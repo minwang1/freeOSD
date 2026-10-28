@@ -1,0 +1,18 @@
+## .NET
+**/bin/
+**/obj/
+.vs/
+artifacts/
+TestResults/
+
+## Python legacy environment and packaging output
+**/.venv/
+**/__pycache__/
+**/*.py[cod]
+python/dist/
+python/build/
+
+## Local IDE/user settings
+*.user
+*.suo
+.idea/
