@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -12,6 +13,7 @@ namespace MonitorControl.Platform.Windows;
 /// <summary>Windows DXVA2 implementation of monitor discovery and DDC/CI VCP access.</summary>
 public sealed class WindowsMonitorBackend : IMonitorBackend
 {
+    private const int InvalidDdcciCommandError = unchecked((int)0xC0262589);
     private readonly object _sync = new();
     private Dictionary<MonitorId, MonitorRoute> _routes = new();
     private readonly ConcurrentDictionary<MonitorId, SemaphoreSlim> _monitorGates = new();
@@ -49,22 +51,35 @@ public sealed class WindowsMonitorBackend : IMonitorBackend
         {
             var raw = ReadCapabilities(handle);
             var features = ParseCapabilities(raw);
+            Trace.TraceInformation($"ddcci.capabilities.completed featureCount={features.Count} responseReceived={!string.IsNullOrWhiteSpace(raw)}");
             return ValueTask.FromResult(new MonitorCapabilities(features, raw, Limitations: string.IsNullOrWhiteSpace(raw) ? ["The monitor did not return a DDC/CI capability string."] : null));
         });
 
     public ValueTask<VcpValue> ReadVcpAsync(MonitorId monitorId, byte code, CancellationToken cancellationToken = default) =>
         WithMonitorAsync(monitorId, cancellationToken, (handle, cancellation) =>
         {
-            if (!Native.GetVCPFeatureAndVCPFeatureReply(handle, code, out _, out var current, out var maximum))
-                throw NativeError(BackendErrorKind.ReadFailure, $"Could not read VCP 0x{code:X2}.", monitorId, code);
+            Trace.TraceInformation($"ddcci.vcp.read.started code=0x{code:X2}");
+            if (!Native.GetVCPFeatureAndVCPFeatureReply(handle, code, out var type, out var current, out var maximum))
+            {
+                var errorCode = Marshal.GetLastPInvokeError();
+                Trace.TraceWarning($"ddcci.vcp.read.failed code=0x{code:X2} win32Error={errorCode}");
+                throw NativeError(BackendErrorKind.ReadFailure, $"Could not read VCP 0x{code:X2}.", monitorId, code, errorCode);
+            }
+            Trace.TraceInformation($"ddcci.vcp.read.completed code=0x{code:X2} vcpType={type} current={current} maximum={maximum}");
             return ValueTask.FromResult(new VcpValue(code, current, maximum));
         });
 
     public ValueTask WriteVcpAsync(MonitorId monitorId, byte code, uint value, CancellationToken cancellationToken = default) =>
         WithMonitorAsync(monitorId, cancellationToken, (handle, _) =>
         {
+            Trace.TraceInformation($"ddcci.vcp.write.started code=0x{code:X2} target={value}");
             if (!Native.SetVCPFeature(handle, code, value))
-                throw NativeError(BackendErrorKind.WriteFailure, $"Could not write VCP 0x{code:X2}.", monitorId, code);
+            {
+                var errorCode = Marshal.GetLastPInvokeError();
+                Trace.TraceWarning($"ddcci.vcp.write.failed code=0x{code:X2} target={value} win32Error={errorCode}");
+                throw NativeError(BackendErrorKind.WriteFailure, $"Could not write VCP 0x{code:X2}.", monitorId, code, errorCode);
+            }
+            Trace.TraceInformation($"ddcci.vcp.write.completed code=0x{code:X2} target={value}");
             return ValueTask.CompletedTask;
         });
 
@@ -248,8 +263,13 @@ public sealed class WindowsMonitorBackend : IMonitorBackend
         if (!OperatingSystem.IsWindows()) throw new BackendOperationException(BackendErrorKind.Unsupported, "The DXVA2 monitor backend is available only on Windows.");
     }
 
-    private static BackendOperationException NativeError(BackendErrorKind kind, string message, MonitorId? id = null, byte? code = null) =>
-        new(kind, message, id, code, Marshal.GetLastPInvokeError().ToString(), innerException: new Win32Exception(Marshal.GetLastPInvokeError()));
+    private static BackendOperationException NativeError(BackendErrorKind kind, string message, MonitorId? id = null, byte? code = null, int? nativeErrorCode = null)
+    {
+        var errorCode = nativeErrorCode ?? Marshal.GetLastPInvokeError();
+        return new BackendOperationException(kind, message, id, code, errorCode.ToString(),
+            isTransient: errorCode == InvalidDdcciCommandError,
+            innerException: new Win32Exception(errorCode));
+    }
 
     private sealed record MonitorRoute(string DisplayName, int Index, string Description);
     private sealed record DiscoveredMonitor(string DisplayName, int Index, string Description, SafePhysicalMonitorHandle Handle);

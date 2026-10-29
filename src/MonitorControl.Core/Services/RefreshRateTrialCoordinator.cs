@@ -59,6 +59,7 @@ public sealed class RefreshRateTrialCoordinator : IAsyncDisposable
         MonitorId monitorId,
         DisplayMode requestedMode,
         TimeSpan confirmationWindow,
+        DisplayModeChangeKind changeKind = DisplayModeChangeKind.RefreshRate,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(requestedMode);
@@ -72,15 +73,15 @@ public sealed class RefreshRateTrialCoordinator : IAsyncDisposable
         {
             ThrowIfDisposed();
             var trialId = CreateUniqueTrialId();
-            var trial = await _backend.ApplyRefreshRateTrialAsync(
-                trialId, monitorId, requestedMode, cancellationToken).ConfigureAwait(false);
+            var trial = await _backend.ApplyDisplayModeTrialAsync(
+                trialId, monitorId, requestedMode, changeKind, cancellationToken).ConfigureAwait(false);
             if (!string.Equals(trial.TrialId, trialId, StringComparison.Ordinal))
             {
                 try
                 {
                     // The adapter contract requires the supplied ID to be its transaction
                     // key, so this rollback target remains unambiguous even on bad output.
-                    await _backend.RestoreRefreshRateTrialAsync(trialId).ConfigureAwait(false);
+                    await _backend.RestoreDisplayModeTrialAsync(trialId).ConfigureAwait(false);
                 }
                 catch (Exception restoreError)
                 {
@@ -108,7 +109,7 @@ public sealed class RefreshRateTrialCoordinator : IAsyncDisposable
                 // IDs are allocated here and checked while starts are serialized; reaching
                 // this branch indicates a coordinator invariant violation. The requested
                 // backend key is still known, so rollback does not target an ambiguous ID.
-                await _backend.RestoreRefreshRateTrialAsync(trialId).ConfigureAwait(false);
+                await _backend.RestoreDisplayModeTrialAsync(trialId).ConfigureAwait(false);
                 throw new InvalidOperationException($"Coordinator generated duplicate refresh-rate trial id '{trialId}'.");
             }
 
@@ -163,7 +164,7 @@ public sealed class RefreshRateTrialCoordinator : IAsyncDisposable
             SetState(entry, entry.State with { Status = RefreshRateTrialStatus.Confirming, LastError = null });
             try
             {
-                await _backend.ConfirmRefreshRateTrialAsync(trialId, cancellationToken).ConfigureAwait(false);
+                await _backend.ConfirmDisplayModeTrialAsync(trialId, cancellationToken).ConfigureAwait(false);
                 SetState(entry, entry.State with { Status = RefreshRateTrialStatus.Confirmed, LastError = null });
                 entry.TimerCancellation.Cancel();
                 return entry.State;
@@ -355,7 +356,7 @@ public sealed class RefreshRateTrialCoordinator : IAsyncDisposable
         try
         {
             // Intentionally no cancellation token: recovery must finish once started.
-            await _backend.RestoreRefreshRateTrialAsync(entry.State.Trial.TrialId).ConfigureAwait(false);
+            await _backend.RestoreDisplayModeTrialAsync(entry.State.Trial.TrialId).ConfigureAwait(false);
             SetState(entry, entry.State with { Status = RefreshRateTrialStatus.Restored, LastError = null });
             entry.TimerCancellation.Cancel();
         }

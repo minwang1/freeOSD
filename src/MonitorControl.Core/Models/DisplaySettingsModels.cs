@@ -38,11 +38,18 @@ public enum CapabilityAvailability
 
 /// <summary>Per-monitor capabilities supplied by the platform display backend.</summary>
 public sealed record PlatformDisplayCapabilities(
-    CapabilityAvailability EnumerateRefreshRates,
+    CapabilityAvailability EnumerateDisplayModes,
+    CapabilityAvailability SetResolution,
     CapabilityAvailability SetRefreshRate,
     CapabilityAvailability ReadHdr,
     CapabilityAvailability SetHdr,
     IReadOnlyList<string>? Limitations = null);
+
+public enum DisplayModeChangeKind
+{
+    Resolution,
+    RefreshRate
+}
 
 /// <summary>
 /// The full mode trial transaction. Both mode snapshots are retained so a caller can
@@ -55,6 +62,7 @@ public sealed record DisplayModeTrial(
     MonitorId MonitorId,
     DisplayMode PreviousMode,
     DisplayMode RequestedMode,
-    DateTimeOffset StartedAt);
+    DateTimeOffset StartedAt,
+    DisplayModeChangeKind ChangeKind = DisplayModeChangeKind.RefreshRate);
 
 public sealed record HdrChangeResult(HdrState PreviousState, HdrState RequestedState);

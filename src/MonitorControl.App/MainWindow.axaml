@@ -117,6 +117,59 @@
                                        Foreground="#687386" FontSize="12" IsVisible="{Binding HasInputSource}" />
                         </StackPanel>
                     </Border>
+
+                    <Border IsVisible="{Binding HasRefreshRateSection}" Background="White" BorderBrush="#DDE3EC" BorderThickness="1" CornerRadius="10" Padding="22">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="分辨率" FontSize="18" FontWeight="SemiBold" />
+                            <Grid ColumnDefinitions="150,*,Auto" ColumnSpacing="12">
+                                <TextBlock Text="目标分辨率" VerticalAlignment="Center" />
+                                <ComboBox Grid.Column="1" ItemsSource="{Binding ResolutionModes}"
+                                          SelectedItem="{Binding SelectedResolutionMode, Mode=TwoWay}"
+                                          IsEnabled="{Binding CanSetResolution}">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate x:DataType="core:DisplayMode">
+                                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                                <TextBlock Text="{Binding Width}" />
+                                                <TextBlock Text="×" />
+                                                <TextBlock Text="{Binding Height}" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                                <Button Grid.Column="2" Content="应用分辨率（15 秒试用）"
+                                        Command="{Binding ApplyResolutionCommand}" />
+                            </Grid>
+                            <TextBlock Text="{Binding ResolutionStatusText}" Foreground="#687386" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding ResolutionError}" Foreground="#B42318" FontSize="12"
+                                       IsVisible="{Binding HasResolutionError}" TextWrapping="Wrap" />
+                            <TextBlock Text="系统没有报告可用分辨率。" Foreground="#687386"
+                                       IsVisible="{Binding HasNoResolutionModes}" />
+
+                            <Separator Margin="0,4" />
+                            <TextBlock Text="刷新率" FontSize="18" FontWeight="SemiBold" />
+                            <Grid ColumnDefinitions="150,*,Auto" ColumnSpacing="12">
+                                <TextBlock Text="目标刷新率" VerticalAlignment="Center" />
+                                <ComboBox Grid.Column="1" ItemsSource="{Binding RefreshRateModes}"
+                                          SelectedItem="{Binding SelectedRefreshRateMode, Mode=TwoWay}"
+                                          IsEnabled="{Binding CanSetRefreshRate}">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate x:DataType="core:DisplayMode">
+                                            <TextBlock Text="{Binding RefreshRateHz, StringFormat='{}{0} Hz'}" />
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                                <Button Grid.Column="2" Content="应用刷新率（15 秒试用）"
+                                        Command="{Binding ApplyRefreshRateCommand}" />
+                            </Grid>
+                            <TextBlock Text="{Binding RefreshRateStatusText}" Foreground="#687386" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding RefreshRateError}" Foreground="#B42318" FontSize="12"
+                                       IsVisible="{Binding HasRefreshRateError}" TextWrapping="Wrap" />
+                            <TextBlock Text="所选分辨率没有可用刷新率选项。" Foreground="#687386"
+                                       IsVisible="{Binding HasNoRefreshRateModes}" />
+                            <Button Content="重试恢复上一次设置" Command="{Binding RetryRefreshRateRestoreCommand}"
+                                    IsVisible="{Binding HasRefreshRateRestoreFailure}" HorizontalAlignment="Left" />
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </ScrollViewer>
         </Grid>

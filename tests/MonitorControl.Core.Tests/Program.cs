@@ -6,6 +6,7 @@ internal static class Program
     {
         var checks = new (string Name, Func<Task> Run)[]
         {
+            (nameof(RefreshRateTrialCoordinatorTests.DisplayModeChangeKindIsPreserved), RefreshRateTrialCoordinatorTests.DisplayModeChangeKindIsPreserved),
             (nameof(RefreshRateTrialCoordinatorTests.ConfirmPreventsDeadlineRestore), RefreshRateTrialCoordinatorTests.ConfirmPreventsDeadlineRestore),
             (nameof(RefreshRateTrialCoordinatorTests.DeadlineExpiryRestoresPreviousMode), RefreshRateTrialCoordinatorTests.DeadlineExpiryRestoresPreviousMode),
             (nameof(RefreshRateTrialCoordinatorTests.UserCancelRestoresPreviousMode), RefreshRateTrialCoordinatorTests.UserCancelRestoresPreviousMode),

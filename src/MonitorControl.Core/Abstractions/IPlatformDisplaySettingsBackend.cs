@@ -28,10 +28,11 @@ public interface IPlatformDisplaySettingsBackend
     /// Once the side effect starts, the backend must return the trial state or throw a
     /// typed error describing the uncertain outcome.
     /// </summary>
-    ValueTask<DisplayModeTrial> ApplyRefreshRateTrialAsync(
+    ValueTask<DisplayModeTrial> ApplyDisplayModeTrialAsync(
         string trialId,
         MonitorId monitorId,
         DisplayMode requestedMode,
+        DisplayModeChangeKind changeKind,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -41,7 +42,7 @@ public interface IPlatformDisplaySettingsBackend
     /// with <see cref="BackendErrorKind.InvalidState"/>. Cancellation is honored only
     /// before the commit transition wins.
     /// </summary>
-    ValueTask ConfirmRefreshRateTrialAsync(string trialId, CancellationToken cancellationToken = default);
+    ValueTask ConfirmDisplayModeTrialAsync(string trialId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Restores the exact previous mode for the trial. The coordinator calls this both
@@ -52,7 +53,7 @@ public interface IPlatformDisplaySettingsBackend
     /// it must run to completion and report success/failure; failures use RestoreFailure
     /// and retain enough state to permit retry.
     /// </summary>
-    ValueTask RestoreRefreshRateTrialAsync(string trialId);
+    ValueTask RestoreDisplayModeTrialAsync(string trialId);
 
     ValueTask<HdrState> GetHdrStateAsync(
         MonitorId monitorId,

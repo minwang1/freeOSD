@@ -9,6 +9,21 @@ public static class RefreshRateTrialCoordinatorTests
 {
     private static readonly MonitorId Monitor = new("test-monitor");
 
+    public static async Task DisplayModeChangeKindIsPreserved()
+    {
+        var backend = new FakeDisplayBackend();
+        await using var coordinator = new RefreshRateTrialCoordinator(backend);
+
+        var trial = await coordinator.StartTrialAsync(
+            Monitor,
+            CreateMode(144),
+            TimeSpan.FromSeconds(5),
+            DisplayModeChangeKind.Resolution);
+
+        Check.Equal(DisplayModeChangeKind.Resolution, trial.Trial.ChangeKind);
+        await coordinator.CancelAsync(trial.Trial.TrialId);
+    }
+
     public static async Task ConfirmPreventsDeadlineRestore()
     {
         var backend = new FakeDisplayBackend();
@@ -130,6 +145,7 @@ public static class RefreshRateTrialCoordinatorTests
             ValueTask.FromResult(new PlatformDisplayCapabilities(
                 CapabilityAvailability.Supported,
                 CapabilityAvailability.Supported,
+                CapabilityAvailability.Supported,
                 CapabilityAvailability.Unsupported,
                 CapabilityAvailability.Unsupported));
 
@@ -138,16 +154,17 @@ public static class RefreshRateTrialCoordinatorTests
             CancellationToken cancellationToken = default) =>
             ValueTask.FromResult<IReadOnlyList<DisplayMode>>(new[] { CreateMode(60), CreateMode(144) });
 
-        public ValueTask<DisplayModeTrial> ApplyRefreshRateTrialAsync(
+        public ValueTask<DisplayModeTrial> ApplyDisplayModeTrialAsync(
             string trialId,
             MonitorId monitorId,
             DisplayMode requestedMode,
+            DisplayModeChangeKind changeKind,
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var previousMode = CreateMode(60) with { IsCurrent = true };
             var requested = requestedMode with { IsCurrent = true };
-            var trial = new DisplayModeTrial(trialId, monitorId, previousMode, requested, DateTimeOffset.UtcNow);
+            var trial = new DisplayModeTrial(trialId, monitorId, previousMode, requested, DateTimeOffset.UtcNow, changeKind);
             if (!_trials.TryAdd(trialId, trial))
             {
                 throw new InvalidOperationException("Duplicate test trial id.");
@@ -155,7 +172,7 @@ public static class RefreshRateTrialCoordinatorTests
             return ValueTask.FromResult(trial);
         }
 
-        public ValueTask ConfirmRefreshRateTrialAsync(
+        public ValueTask ConfirmDisplayModeTrialAsync(
             string trialId,
             CancellationToken cancellationToken = default)
         {
@@ -172,7 +189,7 @@ public static class RefreshRateTrialCoordinatorTests
             return ValueTask.CompletedTask;
         }
 
-        public ValueTask RestoreRefreshRateTrialAsync(string trialId)
+        public ValueTask RestoreDisplayModeTrialAsync(string trialId)
         {
             Interlocked.Increment(ref _restoreCount);
             if (TryConsumeRestoreFailure())
