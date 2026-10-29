@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -26,6 +27,8 @@ public sealed class ControlViewModel : ObservableObject
     private readonly RefreshRateTrialCoordinator? _refreshRateTrialCoordinator;
     private readonly ProfileStore _profileStore;
     private readonly ILoginStartupService? _loginStartupService;
+    private readonly IForegroundApplicationMonitor? _foregroundApplicationMonitor;
+    private readonly AutomationRuleStore _automationRuleStore;
     private readonly SemaphoreSlim _deviceGate = new(1, 1);
     private MonitorDescriptor? _selectedMonitor;
     private bool _isLoading;
@@ -42,6 +45,13 @@ public sealed class ControlViewModel : ObservableObject
     private string _loginStartupStatus = "";
     private MonitorProfile? _selectedProfile;
     private bool _isLoadingProfiles;
+    private bool _isAutomationEnabled;
+    private string _automationStatus = "";
+    private ApplicationProfileRule? _selectedAutomationRule;
+    private MonitorProfile? _defaultAutomationProfile;
+    private readonly IInstalledApplicationCatalog? _installedApplicationCatalog;
+    private bool _isLoadingAutomationSettings;
+    private string? _lastAutomationKey;
     private bool _isLoadingRefreshRates;
     private bool _canSetRefreshRate;
     private bool _canSetResolution;
@@ -64,13 +74,19 @@ public sealed class ControlViewModel : ObservableObject
         IPlatformDisplaySettingsBackend? displaySettingsBackend = null,
         RefreshRateTrialCoordinator? refreshRateTrialCoordinator = null,
         ProfileStore? profileStore = null,
-        ILoginStartupService? loginStartupService = null)
+        ILoginStartupService? loginStartupService = null,
+        IForegroundApplicationMonitor? foregroundApplicationMonitor = null,
+        AutomationRuleStore? automationRuleStore = null,
+        IInstalledApplicationCatalog? installedApplicationCatalog = null)
     {
         _backend = backend ?? throw new ArgumentNullException(nameof(backend));
         _displaySettingsBackend = displaySettingsBackend;
         _refreshRateTrialCoordinator = refreshRateTrialCoordinator;
         _profileStore = profileStore ?? new ProfileStore();
         _loginStartupService = loginStartupService;
+        _foregroundApplicationMonitor = foregroundApplicationMonitor;
+        _installedApplicationCatalog = installedApplicationCatalog;
+        _automationRuleStore = automationRuleStore ?? new AutomationRuleStore();
         _ = LoadLoginStartupAsync();
         if (_refreshRateTrialCoordinator is not null)
         {
@@ -85,7 +101,15 @@ public sealed class ControlViewModel : ObservableObject
         SaveProfileCommand = new AsyncCommand(SaveProfileAsync, () => SelectedMonitor is not null && !string.IsNullOrWhiteSpace(ProfileName));
         ApplyProfileCommand = new AsyncCommand(ApplyProfileAsync, () => SelectedMonitor is not null && SelectedProfile is not null && !IsLoading);
         DeleteProfileCommand = new AsyncCommand(DeleteProfileAsync, () => SelectedProfile is not null);
+        AddAutomationRuleCommand = new AsyncCommand(AddAutomationRuleAsync, CanAddAutomationRule);
+        RemoveAutomationRuleCommand = new AsyncCommand(RemoveAutomationRuleAsync, () => SelectedAutomationRule is not null);
+        if (_foregroundApplicationMonitor is not null)
+        {
+            _foregroundApplicationMonitor.ForegroundApplicationChanged += OnForegroundApplicationChanged;
+            _ = StartForegroundTrackingAsync();
+        }
         _ = LoadProfilesAsync();
+        _ = LoadAutomationRulesAsync();
     }
 
     public ObservableCollection<MonitorDescriptor> Monitors { get; } = [];
@@ -102,9 +126,41 @@ public sealed class ControlViewModel : ObservableObject
     public bool IsHdrEnabled { get => _hdrEnabled; private set => SetField(ref _hdrEnabled, value); }
     public string HdrStatus { get => _hdrStatus; private set => SetField(ref _hdrStatus, value); }
     public ObservableCollection<MonitorProfile> Profiles { get; } = [];
+    public bool HasProfiles => Profiles.Count > 0;
+    public bool HasNoProfiles => Profiles.Count == 0;
     public ICommand SaveProfileCommand { get; }
     public ICommand ApplyProfileCommand { get; }
     public ICommand DeleteProfileCommand { get; }
+    public ObservableCollection<ApplicationProfileRule> AutomationRules { get; } = [];
+    public ICommand AddAutomationRuleCommand { get; }
+    public ICommand RemoveAutomationRuleCommand { get; }
+    public bool IsAutomationSupported => _foregroundApplicationMonitor is not null;
+    public IInstalledApplicationCatalog? InstalledApplicationCatalog => _installedApplicationCatalog;
+    public ValueTask<string?> GetPreviousForegroundExecutablePathAsync() =>
+        _foregroundApplicationMonitor?.GetPreviousForegroundExecutablePathAsync() ?? ValueTask.FromResult<string?>(null);
+    public bool IsAutomationEnabled
+    {
+        get => _isAutomationEnabled;
+        set
+        {
+            if (!SetField(ref _isAutomationEnabled, value)) return;
+            _ = SetAutomationEnabledAsync(value);
+            if (!_isLoadingAutomationSettings) _ = SaveAutomationRulesAsync();
+        }
+    }
+    public string AutomationStatus { get => _automationStatus; private set => SetField(ref _automationStatus, value); }
+    public ApplicationProfileRule? SelectedAutomationRule { get => _selectedAutomationRule; set { if (SetField(ref _selectedAutomationRule, value) && RemoveAutomationRuleCommand is AsyncCommand command) command.RaiseCanExecuteChanged(); } }
+    public MonitorProfile? DefaultAutomationProfile
+    {
+        get => _defaultAutomationProfile;
+        set
+        {
+            if (!SetField(ref _defaultAutomationProfile, value)) return;
+            if (!_isLoadingAutomationSettings) _ = SaveAutomationRulesAsync();
+            OnPropertyChanged(nameof(DefaultAutomationProfileName));
+        }
+    }
+    public string DefaultAutomationProfileName => DefaultAutomationProfile?.Name ?? "不应用预设";
     public string ProfileName { get => _profileName; set { if (SetField(ref _profileName, value)) RaiseProfileCommands(); } }
     public string ProfileStatus { get => _profileStatus; private set => SetField(ref _profileStatus, value); }
     public bool IsProfilesTab
@@ -172,7 +228,7 @@ public sealed class ControlViewModel : ObservableObject
             LoginStartupStatus = $"更新登录启动设置失败：{exception.Message}";
         }
     }
-    public MonitorProfile? SelectedProfile { get => _selectedProfile; set { if (SetField(ref _selectedProfile, value)) RaiseProfileCommands(); } }
+    public MonitorProfile? SelectedProfile { get => _selectedProfile; set { if (SetField(ref _selectedProfile, value)) { RaiseProfileCommands(); RaiseAutomationCommands(); } } }
     public bool IsLoadingProfiles { get => _isLoadingProfiles; private set => SetField(ref _isLoadingProfiles, value); }
 
     public bool HasRefreshRateSection => _displaySettingsBackend is not null;
@@ -268,6 +324,15 @@ public sealed class ControlViewModel : ObservableObject
     public RefreshRateTrialState? GetRefreshRateTrialState(string trialId) =>
         _refreshRateTrialCoordinator?.GetState(trialId);
 
+    public void Dispose()
+    {
+        if (_foregroundApplicationMonitor is not null)
+        {
+            _foregroundApplicationMonitor.ForegroundApplicationChanged -= OnForegroundApplicationChanged;
+            _foregroundApplicationMonitor.Dispose();
+        }
+    }
+
     private void OnRefreshRateTrialStateChanged(object? sender, RefreshRateTrialStateEventArgs eventArgs)
     {
         if (eventArgs.State.Status is not (RefreshRateTrialStatus.RestoreFailed or RefreshRateTrialStatus.Restored)) return;
@@ -311,6 +376,7 @@ public sealed class ControlViewModel : ObservableObject
 
     /// <summary>Set by the owning window so input-source changes can be confirmed.</summary>
     public Func<VcpControlViewModel, Task<bool>>? ConfirmInputSourceAsync { get; set; }
+    public Func<IReadOnlyList<MonitorProfile>, string?, Task<(string? ExecutablePath, string? ProfileName)?>>? AddAutomationRuleDialogAsync { get; set; }
 
     public MonitorDescriptor? SelectedMonitor
     {
@@ -683,6 +749,11 @@ public sealed class ControlViewModel : ObservableObject
             var profiles = await _profileStore.LoadAllAsync();
             Profiles.Clear();
             foreach (var profile in profiles) Profiles.Add(profile);
+            OnPropertyChanged(nameof(HasProfiles));
+            OnPropertyChanged(nameof(HasNoProfiles));
+            if (DefaultAutomationProfile is null && _pendingDefaultProfileName is not null)
+                DefaultAutomationProfile = Profiles.FirstOrDefault(item => string.Equals(item.Name, _pendingDefaultProfileName, StringComparison.OrdinalIgnoreCase));
+            RaiseAutomationCommands();
             ProfileStatus = $"已加载 {Profiles.Count} 个预设。";
         }
         catch (Exception exception) { ProfileStatus = $"读取预设失败：{exception.Message}"; }
@@ -718,6 +789,12 @@ public sealed class ControlViewModel : ObservableObject
             await _profileStore.DeleteAsync(profile.Name);
             SelectedProfile = null;
             await LoadProfilesAsync();
+            var removedRules = AutomationRules.Where(rule => string.Equals(rule.ProfileName, profile.Name, StringComparison.OrdinalIgnoreCase)).ToArray();
+            foreach (var rule in removedRules) AutomationRules.Remove(rule);
+            if (_selectedAutomationRule is not null && removedRules.Contains(_selectedAutomationRule)) SelectedAutomationRule = null;
+            if (removedRules.Length > 0) await SaveAutomationRulesAsync();
+            if (string.Equals(DefaultAutomationProfile?.Name, profile.Name, StringComparison.OrdinalIgnoreCase))
+                DefaultAutomationProfile = null;
             ProfileStatus = $"已删除预设“{profile.Name}”。";
         }
         catch (Exception exception) { ProfileStatus = $"删除预设失败：{exception.Message}"; }
@@ -728,11 +805,21 @@ public sealed class ControlViewModel : ObservableObject
         var monitor = SelectedMonitor;
         var profile = SelectedProfile;
         if (monitor is null || profile is null) return;
+        await ApplyProfileValuesAsync(monitor, profile, skipInputSource: false);
+    }
+
+    private async Task ApplyProfileValuesAsync(MonitorDescriptor monitor, MonitorProfile profile, bool skipInputSource)
+    {
         var controls = ContinuousControls.Concat(DiscreteControls).ToDictionary(control => control.Code);
         var issues = new List<string>();
         var applied = 0;
         foreach (var entry in profile.VcpValues.OrderBy(pair => pair.Key))
         {
+            if (skipInputSource && entry.Key == 0x60)
+            {
+                issues.Add("自动化已跳过输入源 VCP 0x60。请在手动预设中更改输入源。");
+                continue;
+            }
             if (!controls.TryGetValue(entry.Key, out var control))
             {
                 issues.Add($"VCP 0x{entry.Key:X2}: 当前显示器没有该控件。");
@@ -753,9 +840,127 @@ public sealed class ControlViewModel : ObservableObject
             }
             catch (Exception exception) { issues.Add($"{control.Name} (0x{entry.Key:X2}): {exception.Message}"); }
         }
-        ProfileStatus = issues.Count == 0
+        var summary = issues.Count == 0
             ? $"已应用预设“{profile.Name}”，共 {applied} 项。"
             : $"预设部分应用：成功 {applied} 项，失败 {issues.Count} 项。\n" + string.Join("\n", issues);
+        if (skipInputSource) AutomationStatus = summary;
+        else ProfileStatus = summary;
+    }
+
+    private async Task LoadAutomationRulesAsync()
+    {
+        try
+        {
+            _isLoadingAutomationSettings = true;
+            var settings = await _automationRuleStore.LoadAsync();
+            AutomationRules.Clear();
+            foreach (var rule in settings.Rules) AutomationRules.Add(rule);
+            _pendingDefaultProfileName = settings.DefaultProfileName;
+            DefaultAutomationProfile = Profiles.FirstOrDefault(item => string.Equals(item.Name, settings.DefaultProfileName, StringComparison.OrdinalIgnoreCase));
+            _isAutomationEnabled = settings.IsEnabled && IsAutomationSupported;
+            OnPropertyChanged(nameof(IsAutomationEnabled));
+            AutomationStatus = IsAutomationSupported
+                ? $"已加载 {AutomationRules.Count} 条应用规则。自动切换{(_isAutomationEnabled ? "已启用" : "已关闭")}。"
+                : "此平台暂不支持前台应用监控。";
+        }
+        catch (Exception exception) { AutomationStatus = $"读取自动化规则失败：{exception.Message}"; }
+        finally { _isLoadingAutomationSettings = false; }
+    }
+
+    private async Task AddAutomationRuleAsync()
+    {
+        if (AddAutomationRuleDialogAsync is null || Profiles.Count == 0) return;
+        var selection = await AddAutomationRuleDialogAsync(Profiles.ToArray(), DefaultAutomationProfile?.Name);
+        if (selection is null || string.IsNullOrWhiteSpace(selection.Value.ExecutablePath) || string.IsNullOrWhiteSpace(selection.Value.ProfileName)) return;
+        var profile = Profiles.FirstOrDefault(item => string.Equals(item.Name, selection.Value.ProfileName, StringComparison.OrdinalIgnoreCase));
+        if (profile is null) return;
+        ReplaceAutomationRule(selection.Value.ExecutablePath, profile);
+        await SaveAutomationRulesAsync();
+        AutomationStatus = $"已将 {Path.GetFileName(selection.Value.ExecutablePath)} 绑定到预设“{profile.Name}”。";
+    }
+
+    private void ReplaceAutomationRule(string path, MonitorProfile profile)
+    {
+        var existing = AutomationRules.FirstOrDefault(rule => string.Equals(rule.ExecutablePath, path, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null) AutomationRules.Remove(existing);
+        var rule = new ApplicationProfileRule(path, profile.Name);
+        AutomationRules.Add(rule);
+        SelectedAutomationRule = rule;
+    }
+
+    private async Task RemoveAutomationRuleAsync()
+    {
+        if (SelectedAutomationRule is not { } rule) return;
+        AutomationRules.Remove(rule);
+        SelectedAutomationRule = null;
+        await SaveAutomationRulesAsync();
+        AutomationStatus = $"已删除应用规则“{rule.ExecutablePath}”。";
+    }
+
+    private async Task SaveAutomationRulesAsync()
+    {
+        if (_isLoadingAutomationSettings) return;
+        try { await _automationRuleStore.SaveAsync(new ApplicationAutomationSettings(AutomationRules.ToArray(), DefaultAutomationProfile?.Name, IsAutomationEnabled)); }
+        catch (Exception exception) { AutomationStatus = $"保存自动化规则失败：{exception.Message}"; }
+    }
+
+    private string? _pendingDefaultProfileName;
+    private bool CanAddAutomationRule() => IsAutomationSupported && Profiles.Count > 0;
+
+    private void RaiseAutomationCommands()
+    {
+        if (AddAutomationRuleCommand is AsyncCommand command) command.RaiseCanExecuteChanged();
+    }
+
+    private async Task StartForegroundTrackingAsync()
+    {
+        try { await _foregroundApplicationMonitor!.StartAsync(); }
+        catch (Exception exception) { AutomationStatus = $"无法监听前台程序：{exception.Message}"; }
+    }
+
+    private Task SetAutomationEnabledAsync(bool enabled)
+    {
+        if (_foregroundApplicationMonitor is null)
+        {
+            AutomationStatus = "此平台暂不支持前台应用监控。";
+            _isAutomationEnabled = false;
+            OnPropertyChanged(nameof(IsAutomationEnabled));
+            return Task.CompletedTask;
+        }
+        if (enabled)
+            AutomationStatus = "前台应用自动切换已启用；优先使用应用规则，未命中时应用默认预设。";
+        else
+        {
+            _lastAutomationKey = null;
+            AutomationStatus = "前台应用自动切换已关闭。";
+        }
+        return Task.CompletedTask;
+    }
+
+    private void OnForegroundApplicationChanged(object? sender, ForegroundApplicationChangedEventArgs eventArgs)
+    {
+        Dispatcher.UIThread.Post(async () =>
+        {
+            if (!IsAutomationEnabled) return;
+            var rule = AutomationRules.FirstOrDefault(candidate => candidate.IsEnabled &&
+                string.Equals(candidate.ExecutablePath, eventArgs.ExecutablePath, StringComparison.OrdinalIgnoreCase));
+            if (SelectedMonitor is not { } monitor) return;
+            var profileName = rule?.ProfileName ?? DefaultAutomationProfile?.Name;
+            if (profileName is null) return;
+            var profile = Profiles.FirstOrDefault(candidate => string.Equals(candidate.Name, profileName, StringComparison.OrdinalIgnoreCase));
+            if (profile is null)
+            {
+                AutomationStatus = $"自动化预设“{profileName}”不存在。";
+                return;
+            }
+            // Unmatched apps share the same fallback rule; changing between them must not reapply it.
+            var ruleIdentity = rule?.ExecutablePath ?? $"default:{profile.Name}";
+            var key = $"{ruleIdentity}|{profile.Name}|{monitor.Id.Value}";
+            if (string.Equals(_lastAutomationKey, key, StringComparison.OrdinalIgnoreCase)) return;
+            _lastAutomationKey = key;
+            AutomationStatus = $"检测到 {Path.GetFileName(eventArgs.ExecutablePath)}，正在应用“{profile.Name}”…";
+            await ApplyProfileValuesAsync(monitor, profile, skipInputSource: true);
+        });
     }
 
     private void RaiseProfileCommands()

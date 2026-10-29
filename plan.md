@@ -232,7 +232,8 @@ P6 发布、性能与旧实现退役
 | P2 窗口状态 | 已实现，增量构建通过 | 启动恢复并在关闭时保存窗口尺寸、位置及最后打开面板；托盘、关闭到托盘和登录启动仍待实现。 |
 | P2 系统托盘 | 已实现，Windows 增量构建通过 | Avalonia TrayIcon 提供打开/退出；托盘初始化成功后关闭窗口隐藏到托盘，退出继续经过未确认显示模式恢复流程。Linux 托盘依赖桌面环境支持，尚未实机验证。 |
 | P2 登录启动 | 已实现，待增量构建验证 | Windows 设置页通过当前用户 Run 项启用/关闭，无需管理员权限；Linux 明确显示不支持。 |
-| P3 Windows HDR | 已实现初版，构建通过，待 Windows 实机验证 | 通过活动 DisplayConfig 路径查询/切换 Advanced Color，写入后读回并记录诊断日志；不支持路径隐藏控件。显卡/驱动/远程连接限制需实机验证。 |
+| P3 Windows HDR | 已实现，用户已验证切换生效 | 通过活动 DisplayConfig 路径和 HDR 专用状态接口查询/切换，写入后读回并记录诊断日志；旧版 Advanced Color/WCG 状态不再冒充 HDR。 |
+| P3 Windows 应用自动切换 | 已实现首版，待 Windows 实机验证 | 已安装程序搜索选择、添加规则时使用上一个前台程序、逐程序规则、未命中默认预设、预设删除联动和版本化用户存储；自动切换开关状态跨启动恢复。自动应用逐项验证并跳过输入源 VCP 0x60；Linux 不支持。 |
 | 根目录 Git 忽略规则 | 已完成 | 已忽略 .NET `bin/obj`、IDE 文件及 Python 缓存/打包产物。 |
 | Windows/Linux 后端 | 未开始 | 需契约冻结和后续分派。 |
 | .NET 构建 | 已通过 | `dotnet build .\MonitorControl.sln --no-restore -m:1 -v:minimal`，临时设置 `AVALONIA_TELEMETRY_OPTOUT=1`；0 警告、0 错误。 |

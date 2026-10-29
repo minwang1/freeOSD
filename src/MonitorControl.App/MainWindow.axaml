@@ -189,7 +189,7 @@
                 <StackPanel Spacing="18" MaxWidth="900" HorizontalAlignment="Left">
                     <StackPanel Spacing="4">
                         <TextBlock Text="预设与自动化" FontSize="26" FontWeight="SemiBold" />
-                        <TextBlock Text="保存并管理显示器预设。自动化规则将在后续阶段加入。" Foreground="#687386" />
+                        <TextBlock Text="保存显示器预设，并可按前台应用自动应用。" Foreground="#687386" />
                     </StackPanel>
                     <Border IsVisible="{Binding HasMonitors}" Background="White" BorderBrush="#DDE3EC" BorderThickness="1" CornerRadius="10" Padding="22">
                         <StackPanel Spacing="12">
@@ -209,6 +209,43 @@
                                 <Button Grid.Column="2" Content="删除" Command="{Binding DeleteProfileCommand}" />
                             </Grid>
                             <TextBlock Text="{Binding ProfileStatus}" Foreground="#687386" TextWrapping="Wrap" />
+                            <Separator Margin="0,4" />
+                            <TextBlock Text="应用切换" FontSize="18" FontWeight="SemiBold" />
+                            <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8">
+                                <CheckBox Content="为前台应用切换预设"
+                                          IsChecked="{Binding IsAutomationEnabled, Mode=TwoWay}"
+                                          IsEnabled="{Binding IsAutomationSupported}" VerticalAlignment="Center" />
+                                <ComboBox Grid.Column="1" ItemsSource="{Binding AutomationRules}"
+                                          SelectedItem="{Binding SelectedAutomationRule, Mode=TwoWay}"
+                                          PlaceholderText="暂无应用规则">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate x:DataType="core:ApplicationProfileRule">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <TextBlock Text="{Binding ExecutablePath}" />
+                                                <TextBlock Text="→" />
+                                                <TextBlock Text="{Binding ProfileName}" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                                <Button Grid.Column="2" Content="添加规则…" Command="{Binding AddAutomationRuleCommand}" />
+                                <Button Grid.Column="3" Content="删除规则" Command="{Binding RemoveAutomationRuleCommand}" />
+                            </Grid>
+                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                                <TextBlock Text="无匹配规则时使用：" VerticalAlignment="Center" />
+                                <ComboBox Grid.Column="1" ItemsSource="{Binding Profiles}"
+                                          SelectedItem="{Binding DefaultAutomationProfile, Mode=TwoWay}"
+                                          PlaceholderText="不应用预设">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate x:DataType="core:MonitorProfile"><TextBlock Text="{Binding Name}" /></DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                            </Grid>
+                            <TextBlock Text="添加规则时可搜索已安装程序，或使用上一个前台程序。程序规则优先匹配；未命中时应用默认预设。删除预设会同步移除关联规则，自动应用会跳过输入源设置。"
+                                       Foreground="#687386" TextWrapping="Wrap" />
+                            <TextBlock Text="还没有已保存的预设。请先在上方保存预设，再创建应用规则。"
+                                       Foreground="#687386" IsVisible="{Binding HasNoProfiles}" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding AutomationStatus}" Foreground="#687386" TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>
                     <Border IsVisible="{Binding HasNoMonitors}" Background="White" BorderBrush="#DDE3EC" BorderThickness="1" CornerRadius="10" Padding="22">

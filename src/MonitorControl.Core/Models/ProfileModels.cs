@@ -30,3 +30,13 @@ public sealed record MonitorProfile(
 public sealed record ProfileCaptureResult(
     MonitorProfile Profile,
     IReadOnlyList<OperationIssue> OmittedValues);
+
+/// <summary>A Windows foreground executable to portable monitor profile binding.</summary>
+public sealed record ApplicationProfileRule(string ExecutablePath, string ProfileName, bool IsEnabled = true);
+
+public sealed record InstalledApplication(string DisplayName, string ExecutablePath);
+
+public sealed record ApplicationAutomationSettings(
+    IReadOnlyList<ApplicationProfileRule> Rules,
+    string? DefaultProfileName,
+    bool IsEnabled = false);

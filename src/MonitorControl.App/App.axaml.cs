@@ -47,7 +47,9 @@ public partial class App : Application
                     monitorBackend,
                     displaySettingsBackend,
                     _refreshRateTrialCoordinator,
-                    loginStartupService: new WindowsLoginStartupService()));
+                    loginStartupService: new WindowsLoginStartupService(),
+                    foregroundApplicationMonitor: new WindowsForegroundApplicationMonitor(),
+                    installedApplicationCatalog: new WindowsInstalledApplicationCatalog()));
             }
             else
             {

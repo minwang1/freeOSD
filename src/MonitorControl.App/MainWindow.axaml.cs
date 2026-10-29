@@ -1,8 +1,15 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Threading;
+using Avalonia.Controls.Templates;
+using Avalonia.Layout;
+using Avalonia.Media;
 using MonitorControl.Core.Services;
+using MonitorControl.Core.Models;
 using MonitorControl.App.ViewModels;
 using MonitorControl.App.Services;
 
@@ -26,6 +33,7 @@ public partial class MainWindow : Window
         _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
         _viewModel.ConfirmInputSourceAsync = ConfirmInputSourceAsync;
         _viewModel.ConfirmDisplayModeTrialAsync = ConfirmDisplayModeTrialAsync;
+        _viewModel.AddAutomationRuleDialogAsync = AddAutomationRuleDialogAsync;
         DataContext = _viewModel;
         Opened += RestoreWindowSettingsAsync;
         Opened += OnOpened;
@@ -76,6 +84,8 @@ public partial class MainWindow : Window
         {
             _viewModel.ConfirmInputSourceAsync = null;
             _viewModel.ConfirmDisplayModeTrialAsync = null;
+            _viewModel.AddAutomationRuleDialogAsync = null;
+            _viewModel.Dispose();
         }
     }
 
@@ -92,6 +102,151 @@ public partial class MainWindow : Window
     private void OnSettingsTabClick(object? sender, Avalonia.Interactivity.RoutedEventArgs eventArgs)
     {
         if (_viewModel is not null) _viewModel.IsSettingsTab = true;
+    }
+
+    private async Task<(string? ExecutablePath, string? ProfileName)?> AddAutomationRuleDialogAsync(
+        IReadOnlyList<MonitorProfile> profiles, string? defaultProfileName)
+    {
+        if (_viewModel?.InstalledApplicationCatalog is not { } catalog) return null;
+        var apps = await catalog.GetApplicationsAsync();
+        var profilePicker = new ComboBox
+        {
+            ItemsSource = profiles,
+            SelectedItem = profiles.FirstOrDefault(profile => string.Equals(profile.Name, defaultProfileName, StringComparison.OrdinalIgnoreCase)) ?? profiles.FirstOrDefault(),
+            Margin = new Avalonia.Thickness(12, 4, 12, 8)
+        };
+        var title = new TextBlock
+        {
+            Text = $"选择要应用预设“{(profilePicker.SelectedItem as MonitorProfile)?.Name}”的已安装程序。",
+            Margin = new Avalonia.Thickness(12, 10, 12, 4)
+        };
+        profilePicker.ItemTemplate = new FuncDataTemplate<MonitorProfile>((profile, _) => new TextBlock { Text = profile?.Name ?? "" });
+        var search = new TextBox { PlaceholderText = "搜索已安装程序", Margin = new Avalonia.Thickness(12, 4, 6, 8) };
+        var previousApplicationButton = new Button { Content = "使用上一个前台程序", Margin = new Avalonia.Thickness(6, 4, 12, 8) };
+        var selectedApplicationText = new TextBlock
+        {
+            Text = "未选择程序",
+            Foreground = Brush.Parse("#687386"),
+            Margin = new Avalonia.Thickness(12, 0, 12, 8),
+            TextWrapping = TextWrapping.Wrap
+        };
+        string? selectedExecutablePath = null;
+        var applicationList = new ListBox
+        {
+            ItemsSource = apps,
+            Margin = new Avalonia.Thickness(12, 0, 12, 8),
+            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Stretch,
+            ItemTemplate = new FuncDataTemplate<InstalledApplication>((app, _) => new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 10,
+                Children =
+                {
+                    new TextBlock { Text = app?.DisplayName ?? "", Width = 330, TextTrimming = TextTrimming.CharacterEllipsis },
+                    new TextBlock { Text = app is null ? "" : Path.GetFileName(app.ExecutablePath), Foreground = Brush.Parse("#687386") }
+                }
+            })
+        };
+        var okButton = new Button { Content = "添加规则", MinWidth = 90, IsEnabled = false };
+        var cancelButton = new Button { Content = "取消", MinWidth = 90 };
+        var searchRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+        searchRow.Children.Add(search);
+        searchRow.Children.Add(previousApplicationButton);
+        Grid.SetColumn(previousApplicationButton, 1);
+        var buttonRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+            Spacing = 8,
+            Margin = new Avalonia.Thickness(12, 4, 12, 12),
+            Children = { cancelButton, okButton }
+        };
+        var contentGrid = new Grid
+        {
+            RowDefinitions = new RowDefinitions
+            {
+                new RowDefinition(GridLength.Auto),
+                new RowDefinition(GridLength.Auto),
+                new RowDefinition(GridLength.Auto),
+                new RowDefinition(GridLength.Auto),
+                new RowDefinition(new GridLength(1, GridUnitType.Star)),
+                new RowDefinition(GridLength.Auto)
+            }
+        };
+        contentGrid.Children.Add(title);
+        contentGrid.Children.Add(profilePicker);
+        contentGrid.Children.Add(searchRow);
+        contentGrid.Children.Add(selectedApplicationText);
+        contentGrid.Children.Add(applicationList);
+        contentGrid.Children.Add(buttonRow);
+        Grid.SetRow(profilePicker, 1);
+        Grid.SetRow(searchRow, 2);
+        Grid.SetRow(selectedApplicationText, 3);
+        Grid.SetRow(applicationList, 4);
+        Grid.SetRow(buttonRow, 5);
+        var dialog = new Window
+        {
+            Title = "添加应用规则",
+            Width = 820,
+            Height = 620,
+            MinWidth = 600,
+            MinHeight = 480,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = true,
+            Content = contentGrid
+        };
+        void UpdateAddButton() => okButton.IsEnabled = !string.IsNullOrWhiteSpace(selectedExecutablePath) && profilePicker.SelectedItem is MonitorProfile;
+        applicationList.SelectionChanged += (_, _) =>
+        {
+            selectedExecutablePath = (applicationList.SelectedItem as InstalledApplication)?.ExecutablePath;
+            selectedApplicationText.Text = selectedExecutablePath is null
+                ? "未选择程序"
+                : $"{Path.GetFileName(selectedExecutablePath)}\n{selectedExecutablePath}";
+            UpdateAddButton();
+        };
+        profilePicker.SelectionChanged += (_, _) =>
+        {
+            UpdateAddButton();
+            title.Text = $"选择要应用预设“{(profilePicker.SelectedItem as MonitorProfile)?.Name}”的已安装程序。";
+        };
+        search.TextChanged += (_, _) =>
+        {
+            var query = search.Text?.Trim() ?? "";
+            applicationList.ItemsSource = string.IsNullOrEmpty(query)
+                ? apps
+                : apps.Where(app => app.DisplayName.Contains(query, StringComparison.CurrentCultureIgnoreCase)
+                    || app.ExecutablePath.Contains(query, StringComparison.CurrentCultureIgnoreCase)).ToArray();
+            applicationList.SelectedItem = null;
+            selectedExecutablePath = null;
+            selectedApplicationText.Text = "未选择程序";
+            UpdateAddButton();
+        };
+        previousApplicationButton.Click += async (_, _) =>
+        {
+            var previousPath = await _viewModel!.GetPreviousForegroundExecutablePathAsync();
+            if (string.IsNullOrWhiteSpace(previousPath))
+            {
+                selectedExecutablePath = null;
+                selectedApplicationText.Text = "还没有记录到上一个前台程序。先切换到目标程序，再返回此窗口添加规则。";
+                UpdateAddButton();
+                return;
+            }
+            selectedExecutablePath = previousPath;
+            applicationList.SelectedItem = apps.FirstOrDefault(app => string.Equals(app.ExecutablePath, previousPath, StringComparison.OrdinalIgnoreCase));
+            selectedApplicationText.Text = $"{Path.GetFileName(previousPath)}\n{previousPath}";
+            UpdateAddButton();
+        };
+        cancelButton.Click += (_, _) => dialog.Close(false);
+        okButton.Click += (_, _) => dialog.Close(true);
+        if (apps.Count == 0)
+        {
+            title.Text = "没有找到可执行文件路径有效的已安装程序。也可以使用“上一个前台程序”。";
+            applicationList.IsEnabled = false;
+        }
+        var accepted = await dialog.ShowDialog<bool>(this);
+        return accepted && !string.IsNullOrWhiteSpace(selectedExecutablePath) && profilePicker.SelectedItem is MonitorProfile selectedProfile
+            ? (selectedExecutablePath, selectedProfile.Name)
+            : null;
     }
 
     private async Task<bool> ConfirmInputSourceAsync(VcpControlViewModel control)
