@@ -36,7 +36,7 @@
                     <Button Content="▣  预设与自动化" HorizontalContentAlignment="Left"
                             Click="OnProfilesTabClick" />
                     <Button Content="◈  识别与诊断" HorizontalContentAlignment="Left" IsEnabled="False" />
-                    <Button Content="⚙  设置" HorizontalContentAlignment="Left" IsEnabled="False" />
+                    <Button Content="⚙  设置" HorizontalContentAlignment="Left" Click="OnSettingsTabClick" />
                 </StackPanel>
             </Border>
 
@@ -204,6 +204,20 @@
                         <StackPanel Spacing="8">
                             <TextBlock Text="连接显示器后即可创建和应用预设。" FontSize="17" FontWeight="SemiBold" />
                             <TextBlock Text="请先扫描并选择可访问的显示器。" Foreground="#687386" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+            <ScrollViewer Grid.Column="1" Padding="28" IsVisible="{Binding IsSettingsTab}">
+                <StackPanel Spacing="18" MaxWidth="900" HorizontalAlignment="Left">
+                    <TextBlock Text="设置" FontSize="26" FontWeight="SemiBold" />
+                    <Border Background="White" BorderBrush="#DDE3EC" BorderThickness="1" CornerRadius="10" Padding="22">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="启动与托盘" FontSize="18" FontWeight="SemiBold" />
+                            <CheckBox Content="登录 Windows 时启动 Monitor Control"
+                                      IsChecked="{Binding LoginStartupEnabled, Mode=TwoWay}"
+                                      IsEnabled="{Binding IsLoginStartupSupported}" />
+                            <TextBlock Text="{Binding LoginStartupStatus}" Foreground="#687386" TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>
                 </StackPanel>

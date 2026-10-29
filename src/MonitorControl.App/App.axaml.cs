@@ -46,7 +46,8 @@ public partial class App : Application
                 desktop.MainWindow = _mainWindow = new MainWindow(new ControlViewModel(
                     monitorBackend,
                     displaySettingsBackend,
-                    _refreshRateTrialCoordinator));
+                    _refreshRateTrialCoordinator,
+                    loginStartupService: new WindowsLoginStartupService()));
             }
             else
             {

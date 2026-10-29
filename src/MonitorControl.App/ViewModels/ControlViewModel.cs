@@ -25,6 +25,7 @@ public sealed class ControlViewModel : ObservableObject
     private readonly IPlatformDisplaySettingsBackend? _displaySettingsBackend;
     private readonly RefreshRateTrialCoordinator? _refreshRateTrialCoordinator;
     private readonly ProfileStore _profileStore;
+    private readonly ILoginStartupService? _loginStartupService;
     private readonly SemaphoreSlim _deviceGate = new(1, 1);
     private MonitorDescriptor? _selectedMonitor;
     private bool _isLoading;
@@ -36,6 +37,9 @@ public sealed class ControlViewModel : ObservableObject
     private string _profileName = "";
     private string _profileStatus = "";
     private bool _isProfilesTab;
+    private bool _isSettingsTab;
+    private bool _loginStartupEnabled;
+    private string _loginStartupStatus = "";
     private MonitorProfile? _selectedProfile;
     private bool _isLoadingProfiles;
     private bool _isLoadingRefreshRates;
@@ -56,12 +60,15 @@ public sealed class ControlViewModel : ObservableObject
         IMonitorBackend backend,
         IPlatformDisplaySettingsBackend? displaySettingsBackend = null,
         RefreshRateTrialCoordinator? refreshRateTrialCoordinator = null,
-        ProfileStore? profileStore = null)
+        ProfileStore? profileStore = null,
+        ILoginStartupService? loginStartupService = null)
     {
         _backend = backend ?? throw new ArgumentNullException(nameof(backend));
         _displaySettingsBackend = displaySettingsBackend;
         _refreshRateTrialCoordinator = refreshRateTrialCoordinator;
         _profileStore = profileStore ?? new ProfileStore();
+        _loginStartupService = loginStartupService;
+        _ = LoadLoginStartupAsync();
         if (_refreshRateTrialCoordinator is not null)
         {
             _refreshRateTrialCoordinator.StateChanged += OnRefreshRateTrialStateChanged;
@@ -98,10 +105,65 @@ public sealed class ControlViewModel : ObservableObject
         set
         {
             if (!SetField(ref _isProfilesTab, value)) return;
+            if (value) _isSettingsTab = false;
             OnPropertyChanged(nameof(IsControlTab));
+            OnPropertyChanged(nameof(IsSettingsTab));
         }
     }
-    public bool IsControlTab => !IsProfilesTab;
+    public bool IsControlTab => !IsProfilesTab && !IsSettingsTab;
+    public bool IsSettingsTab
+    {
+        get => _isSettingsTab;
+        set
+        {
+            if (!SetField(ref _isSettingsTab, value)) return;
+            if (value) _isProfilesTab = false;
+            OnPropertyChanged(nameof(IsControlTab));
+            OnPropertyChanged(nameof(IsProfilesTab));
+        }
+    }
+    public bool IsLoginStartupSupported => _loginStartupService?.IsSupported == true;
+    public bool LoginStartupEnabled
+    {
+        get => _loginStartupEnabled;
+        set
+        {
+            if (!SetField(ref _loginStartupEnabled, value) || _loginStartupService is null) return;
+            _ = UpdateLoginStartupAsync(value);
+        }
+    }
+    public string LoginStartupStatus { get => _loginStartupStatus; private set => SetField(ref _loginStartupStatus, value); }
+
+    private async Task LoadLoginStartupAsync()
+    {
+        if (_loginStartupService is null || !_loginStartupService.IsSupported)
+        {
+            LoginStartupStatus = "此平台暂不支持登录启动。";
+            return;
+        }
+        try
+        {
+            _loginStartupEnabled = await _loginStartupService.GetEnabledAsync();
+            OnPropertyChanged(nameof(LoginStartupEnabled));
+            LoginStartupStatus = "仅为当前 Windows 用户设置，无需管理员权限。";
+        }
+        catch (Exception exception) { LoginStartupStatus = $"读取登录启动状态失败：{exception.Message}"; }
+    }
+
+    private async Task UpdateLoginStartupAsync(bool enabled)
+    {
+        try
+        {
+            await _loginStartupService!.SetEnabledAsync(enabled);
+            LoginStartupStatus = enabled ? "已启用登录时启动。" : "已关闭登录时启动。";
+        }
+        catch (Exception exception)
+        {
+            _loginStartupEnabled = !enabled;
+            OnPropertyChanged(nameof(LoginStartupEnabled));
+            LoginStartupStatus = $"更新登录启动设置失败：{exception.Message}";
+        }
+    }
     public MonitorProfile? SelectedProfile { get => _selectedProfile; set { if (SetField(ref _selectedProfile, value)) RaiseProfileCommands(); } }
     public bool IsLoadingProfiles { get => _isLoadingProfiles; private set => SetField(ref _isLoadingProfiles, value); }
 

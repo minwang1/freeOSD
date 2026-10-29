@@ -89,6 +89,11 @@ public partial class MainWindow : Window
         if (_viewModel is not null) _viewModel.IsProfilesTab = true;
     }
 
+    private void OnSettingsTabClick(object? sender, Avalonia.Interactivity.RoutedEventArgs eventArgs)
+    {
+        if (_viewModel is not null) _viewModel.IsSettingsTab = true;
+    }
+
     private async Task<bool> ConfirmInputSourceAsync(VcpControlViewModel control)
     {
         var option = control.SelectedOption;
