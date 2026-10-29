@@ -12,6 +12,8 @@ public partial class MainWindow : Window
 {
     private readonly ControlViewModel? _viewModel;
     private readonly WindowSettingsStore _windowSettingsStore = new();
+    public bool AllowClose { get; set; }
+    public bool TrayAvailable { get; set; }
 
     public MainWindow()
     {
@@ -28,7 +30,16 @@ public partial class MainWindow : Window
         Opened += RestoreWindowSettingsAsync;
         Opened += OnOpened;
         Closing += SaveWindowSettings;
+        Closing += CloseToTray;
         Closed += OnClosed;
+    }
+
+    private void CloseToTray(object? sender, WindowClosingEventArgs eventArgs)
+    {
+        if (AllowClose || !TrayAvailable) return;
+        eventArgs.Cancel = true;
+        ShowInTaskbar = false;
+        Hide();
     }
 
     private async void RestoreWindowSettingsAsync(object? sender, EventArgs eventArgs)

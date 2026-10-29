@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Controls;
+using Avalonia.Platform;
 using MonitorControl.App.Diagnostics;
 using MonitorControl.App.ViewModels;
 using MonitorControl.Core.Abstractions;
@@ -20,6 +22,9 @@ public partial class App : Application
     private RefreshRateTrialCoordinator? _refreshRateTrialCoordinator;
     private bool _allowShutdown;
     private int _shutdownResolutionRunning;
+    private MainWindow? _mainWindow;
+    private IClassicDesktopStyleApplicationLifetime? _desktop;
+    private TrayIcon? _trayIcon;
 
     public override void Initialize()
     {
@@ -31,24 +36,73 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            _desktop = desktop;
             if (OperatingSystem.IsWindows())
             {
                 var monitorBackend = new WindowsMonitorBackend();
                 var displaySettingsBackend = new WindowsDisplaySettingsBackend();
                 _refreshRateTrialCoordinator = new RefreshRateTrialCoordinator(displaySettingsBackend);
                 desktop.ShutdownRequested += OnShutdownRequested;
-                desktop.MainWindow = new MainWindow(new ControlViewModel(
+                desktop.MainWindow = _mainWindow = new MainWindow(new ControlViewModel(
                     monitorBackend,
                     displaySettingsBackend,
                     _refreshRateTrialCoordinator));
             }
             else
             {
-                desktop.MainWindow = new MainWindow(new ControlViewModel(new UnsupportedPlatformMonitorBackend()));
+                desktop.MainWindow = _mainWindow = new MainWindow(new ControlViewModel(new UnsupportedPlatformMonitorBackend()));
             }
+
+            InitializeTrayIcon();
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private void InitializeTrayIcon()
+    {
+        try
+        {
+            var menu = new NativeMenu();
+            var openItem = new NativeMenuItem("打开 Monitor Control");
+            openItem.Click += (_, _) => ShowMainWindow();
+            var exitItem = new NativeMenuItem("退出");
+            exitItem.Click += (_, _) => ExitApplication();
+            menu.Items.Add(openItem);
+            menu.Items.Add(new NativeMenuItemSeparator());
+            menu.Items.Add(exitItem);
+
+            _trayIcon = new TrayIcon
+            {
+                Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://MonitorControl.App/Assets/monitor-control.ico"))),
+                ToolTipText = "Monitor Control",
+                Menu = menu
+            };
+            _trayIcon.Clicked += (_, _) => ShowMainWindow();
+            TrayIcon.SetIcons(this, new TrayIcons { _trayIcon });
+            if (_mainWindow is not null) _mainWindow.TrayAvailable = true;
+        }
+        catch (Exception exception)
+        {
+            _trayIcon?.Dispose();
+            _trayIcon = null;
+            DiagnosticLog.Write("WARN", "tray.initialize.failed", $"error={exception.Message}");
+        }
+    }
+
+    private void ShowMainWindow()
+    {
+        if (_mainWindow is null) return;
+        _mainWindow.ShowInTaskbar = true;
+        _mainWindow.Show();
+        _mainWindow.WindowState = WindowState.Normal;
+        _mainWindow.Activate();
+    }
+
+    private void ExitApplication()
+    {
+        if (_mainWindow is not null) _mainWindow.AllowClose = true;
+        _desktop?.Shutdown();
     }
 
     private async void OnShutdownRequested(object? sender, ShutdownRequestedEventArgs eventArgs)

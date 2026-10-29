@@ -230,6 +230,7 @@ P6 发布、性能与旧实现退役
 | Avalonia 控制页 | 已实现，构建与 Windows UI 启动通过 | 基础 DDC/CI 控件接入 ViewModel；App 按平台选择 Windows adapter 或明确显示未实现平台错误；设备能力读取通过，硬件写入尚未验证。 |
 | P2 预设管理 | 已实现，增量构建通过 | “预设与自动化”独立面板支持保存已确认 VCP 值、逐项读回验证应用和删除；存于用户数据目录版本化 JSON。刷新率/HDR 尚未加入预设。 |
 | P2 窗口状态 | 已实现，增量构建通过 | 启动恢复并在关闭时保存窗口尺寸、位置及最后打开面板；托盘、关闭到托盘和登录启动仍待实现。 |
+| P2 系统托盘 | 已实现，Windows 增量构建通过 | Avalonia TrayIcon 提供打开/退出；托盘初始化成功后关闭窗口隐藏到托盘，退出继续经过未确认显示模式恢复流程。Linux 托盘依赖桌面环境支持，尚未实机验证。 |
 | 根目录 Git 忽略规则 | 已完成 | 已忽略 .NET `bin/obj`、IDE 文件及 Python 缓存/打包产物。 |
 | Windows/Linux 后端 | 未开始 | 需契约冻结和后续分派。 |
 | .NET 构建 | 已通过 | `dotnet build .\MonitorControl.sln --no-restore -m:1 -v:minimal`，临时设置 `AVALONIA_TELEMETRY_OPTOUT=1`；0 警告、0 错误。 |
