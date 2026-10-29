@@ -45,6 +45,9 @@ public sealed class ControlViewModel : ObservableObject
     private bool _isLoadingRefreshRates;
     private bool _canSetRefreshRate;
     private bool _canSetResolution;
+    private bool _hdrSupported;
+    private bool _hdrEnabled;
+    private string _hdrStatus = "";
     private string? _refreshRateError;
     private string _refreshRateStatusText = "";
     private string? _resolutionError;
@@ -78,6 +81,7 @@ public sealed class ControlViewModel : ObservableObject
         ApplyResolutionCommand = new AsyncCommand(ApplyResolutionAsync, CanApplyResolution);
         RetryRefreshRateRestoreCommand = new AsyncCommand(RetryRefreshRateRestoreAsync,
             () => _restoreFailureTrialId is not null);
+        ToggleHdrCommand = new AsyncCommand(ToggleHdrAsync, () => IsHdrSupported && SelectedMonitor is not null);
         SaveProfileCommand = new AsyncCommand(SaveProfileAsync, () => SelectedMonitor is not null && !string.IsNullOrWhiteSpace(ProfileName));
         ApplyProfileCommand = new AsyncCommand(ApplyProfileAsync, () => SelectedMonitor is not null && SelectedProfile is not null && !IsLoading);
         DeleteProfileCommand = new AsyncCommand(DeleteProfileAsync, () => SelectedProfile is not null);
@@ -93,6 +97,10 @@ public sealed class ControlViewModel : ObservableObject
     public ICommand ApplyRefreshRateCommand { get; }
     public ICommand ApplyResolutionCommand { get; }
     public ICommand RetryRefreshRateRestoreCommand { get; }
+    public ICommand ToggleHdrCommand { get; }
+    public bool IsHdrSupported { get => _hdrSupported; private set => SetField(ref _hdrSupported, value); }
+    public bool IsHdrEnabled { get => _hdrEnabled; private set => SetField(ref _hdrEnabled, value); }
+    public string HdrStatus { get => _hdrStatus; private set => SetField(ref _hdrStatus, value); }
     public ObservableCollection<MonitorProfile> Profiles { get; } = [];
     public ICommand SaveProfileCommand { get; }
     public ICommand ApplyProfileCommand { get; }
@@ -168,6 +176,7 @@ public sealed class ControlViewModel : ObservableObject
     public bool IsLoadingProfiles { get => _isLoadingProfiles; private set => SetField(ref _isLoadingProfiles, value); }
 
     public bool HasRefreshRateSection => _displaySettingsBackend is not null;
+    public bool HasHdrSection => _displaySettingsBackend is not null;
     public bool HasRefreshRateModes => RefreshRateModes.Count > 0;
     public bool HasNoRefreshRateModes => HasRefreshRateSection && !IsLoadingRefreshRates && !HasRefreshRateModes;
     public bool HasResolutionModes => ResolutionModes.Count > 0;
@@ -572,6 +581,17 @@ public sealed class ControlViewModel : ObservableObject
 
             CanSetRefreshRate = capabilities.SetRefreshRate == CapabilityAvailability.Supported;
             CanSetResolution = capabilities.SetResolution == CapabilityAvailability.Supported;
+            IsHdrSupported = capabilities.ReadHdr == CapabilityAvailability.Supported &&
+                             capabilities.SetHdr == CapabilityAvailability.Supported;
+            if (IsHdrSupported)
+            {
+                var hdrState = await _displaySettingsBackend.GetHdrStateAsync(monitor.Id);
+                IsHdrSupported = hdrState.IsSupported;
+                IsHdrEnabled = hdrState.IsEnabled;
+                HdrStatus = IsHdrSupported ? (IsHdrEnabled ? "HDR 已开启。" : "HDR 已关闭。") : "当前显示器不支持 HDR。";
+            }
+            else HdrStatus = "当前显示器或连接路径不支持 HDR 控制。";
+            if (ToggleHdrCommand is AsyncCommand hdrCommand) hdrCommand.RaiseCanExecuteChanged();
             if (capabilities.EnumerateDisplayModes != CapabilityAvailability.Supported)
             {
                 RefreshRateStatusText = capabilities.EnumerateDisplayModes == CapabilityAvailability.Unsupported
@@ -749,6 +769,29 @@ public sealed class ControlViewModel : ObservableObject
     {
         var mode = SelectedRefreshRateMode;
         if (mode is not null) await ApplyDisplayModeTrialAsync(mode, isResolution: false);
+    }
+
+    private async Task ToggleHdrAsync()
+    {
+        var monitor = SelectedMonitor;
+        if (_displaySettingsBackend is null || monitor is null || !IsHdrSupported) return;
+        var requested = !IsHdrEnabled;
+        HdrStatus = requested ? "正在开启 HDR…" : "正在关闭 HDR…";
+        DiagnosticLog.Write("INFO", "display.hdr.change.started", $"enabled={requested}");
+        try
+        {
+            await _displaySettingsBackend.SetHdrStateAsync(monitor.Id, requested);
+            var actual = await _displaySettingsBackend.GetHdrStateAsync(monitor.Id);
+            IsHdrSupported = actual.IsSupported;
+            IsHdrEnabled = actual.IsEnabled;
+            HdrStatus = actual.IsEnabled == requested ? (requested ? "HDR 已开启。" : "HDR 已关闭。") : "Windows 返回成功，但 HDR 状态读回不匹配。";
+            DiagnosticLog.Write(actual.IsEnabled == requested ? "INFO" : "WARN", "display.hdr.change.readback", $"requested={requested} actual={actual.IsEnabled} supported={actual.IsSupported}");
+        }
+        catch (Exception exception)
+        {
+            HdrStatus = $"HDR 设置失败：{exception.Message}";
+            DiagnosticLog.Write("ERROR", "display.hdr.change.failed", $"requested={requested} errorType={exception.GetType().Name} message={exception.Message}");
+        }
     }
 
     private void PopulateRefreshRatesForResolution(DisplayMode? resolution)
@@ -960,6 +1003,9 @@ public sealed class ControlViewModel : ObservableObject
         SelectedResolutionMode = null;
         CanSetRefreshRate = false;
         CanSetResolution = false;
+        IsHdrSupported = false;
+        IsHdrEnabled = false;
+        HdrStatus = "请先选择显示器。";
         RefreshRateError = null;
         ResolutionError = null;
         RefreshRateStatusText = _displaySettingsBackend is null ? "" : "请先选择显示器。";

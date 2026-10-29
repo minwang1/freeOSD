@@ -45,3 +45,5 @@ DDC/CI 实机功能需要支持 DDC/CI 的显示器和连接链路，并在显�
 Windows 是当前首个硬件后端目标。Linux UI 与后端接口按跨平台结构设计，但 Linux 设备发现、DDC/CI 权限、托盘、自启动、刷新率和 HDR 支持均需分别实现和验证；Avalonia 可启动不代表这些系统功能已受支持。
 
 Windows 登录启动可在“设置”页启用，作用于当前用户且无需管理员权限；Linux 登录启动尚未实现。
+
+Windows HDR 使用 HDR 专用 DisplayConfig 状态查询与切换，并在操作后读回状态。旧版 Advanced Color 位同时覆盖 HDR 与 WCG，不能用来判断 HDR，因此 HDR 专用接口不可用时不报告支持。显卡、驱动、Windows 版本、远程会话和连接方式可能限制该能力；该功能仍需在目标 Windows/显示器组合上进行实机验证。

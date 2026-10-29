@@ -44,13 +44,18 @@ public sealed class WindowsDisplaySettingsBackend : IPlatformDisplaySettingsBack
         {
             var current = ReadCurrentMode(displayName, monitorId);
             _ = current;
+            var hdrSupported = false;
+            try { hdrSupported = TryGetHdrState(displayName, monitorId, out _); }
+            catch (BackendOperationException exception)
+            {
+                Trace.TraceWarning($"display.hdr.capability.unavailable display={displayName} error={exception.Message}");
+            }
             return new PlatformDisplayCapabilities(
                 CapabilityAvailability.Supported,
                 CapabilityAvailability.Supported,
                 CapabilityAvailability.Supported,
-                CapabilityAvailability.Unsupported,
-                CapabilityAvailability.Unsupported,
-                ["Windows HDR control is not implemented by this adapter."]);
+                hdrSupported ? CapabilityAvailability.Supported : CapabilityAvailability.Unsupported,
+                hdrSupported ? CapabilityAvailability.Supported : CapabilityAvailability.Unsupported);
         }, cancellationToken).ConfigureAwait(false);
     }
 
@@ -227,16 +232,75 @@ public sealed class WindowsDisplaySettingsBackend : IPlatformDisplaySettingsBack
     {
         EnsureWindows();
         cancellationToken.ThrowIfCancellationRequested();
-        _ = ResolveDisplayName(monitorId);
-        return ValueTask.FromResult(new HdrState(IsSupported: false, IsEnabled: false));
+        var displayName = ResolveDisplayName(monitorId);
+        return ValueTask.FromResult(TryGetHdrState(displayName, monitorId, out var state)
+            ? state
+            : new HdrState(IsSupported: false, IsEnabled: false));
     }
 
     public ValueTask SetHdrStateAsync(MonitorId monitorId, bool enabled, CancellationToken cancellationToken = default)
     {
         EnsureWindows();
         cancellationToken.ThrowIfCancellationRequested();
-        _ = ResolveDisplayName(monitorId);
-        throw new BackendOperationException(BackendErrorKind.Unsupported, "HDR control is not implemented by this adapter.", monitorId);
+        var displayName = ResolveDisplayName(monitorId);
+        var target = GetTarget(displayName, monitorId);
+        var packet = new Native.SetHdrState
+        {
+            Header = Native.CreateHeader(Native.SetHdrStateType, Marshal.SizeOf<Native.SetHdrState>(), target.AdapterId, target.Id),
+            Value = enabled ? 1u : 0u
+        };
+        var result = Native.DisplayConfigSetDeviceInfo(ref packet);
+        if (result != 0)
+            throw new BackendOperationException(BackendErrorKind.WriteFailure, $"Windows could not change HDR state (DisplayConfig error {result}).", monitorId, platformCode: result.ToString());
+        if (!TryGetHdrState(displayName, monitorId, out var actual) || actual.IsEnabled != enabled)
+            throw new BackendOperationException(BackendErrorKind.WriteFailure, "Windows accepted the HDR request but the active state did not match on readback.", monitorId);
+        Trace.TraceInformation($"display.hdr.changed display={displayName} enabled={enabled} readback={actual.IsEnabled}");
+        return ValueTask.CompletedTask;
+    }
+
+    private static bool TryGetHdrState(string displayName, MonitorId monitorId, out HdrState state)
+    {
+        state = new HdrState(false, false);
+        var target = GetTarget(displayName, monitorId);
+        var packet = new Native.GetAdvancedColorInfo2
+        {
+            Header = Native.CreateHeader(Native.GetAdvancedColorInfo2Type, Marshal.SizeOf<Native.GetAdvancedColorInfo2>(), target.AdapterId, target.Id)
+        };
+        var result = Native.DisplayConfigGetDeviceInfo(ref packet);
+        if (result != 0)
+        {
+            Trace.TraceWarning($"display.hdr.read.failed display={displayName} result={result}; HDR-specific DisplayConfig API may be unavailable");
+            return false;
+        }
+        var supported = (packet.Value & (1u << 4)) != 0;
+        var enabled = (packet.Value & (1u << 5)) != 0;
+        state = new HdrState(supported, supported && enabled);
+        Trace.TraceInformation($"display.hdr.read display={displayName} supported={supported} enabled={enabled} activeColorMode={packet.ActiveColorMode} value=0x{packet.Value:X8}");
+        return supported;
+    }
+
+    private static Native.PathTargetInfo GetTarget(string displayName, MonitorId monitorId)
+    {
+        var flags = 0x00000002u; // QDC_ONLY_ACTIVE_PATHS
+        var result = Native.GetDisplayConfigBufferSizes(flags, out var pathCount, out var modeCount);
+        if (result != 0) throw new BackendOperationException(BackendErrorKind.Unavailable, $"Could not query active display paths (error {result}).", monitorId, platformCode: result.ToString());
+        var paths = new Native.PathInfo[pathCount];
+        var modes = new Native.ModeInfo[modeCount];
+        result = Native.QueryDisplayConfig(flags, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero, 0);
+        if (result != 0) throw new BackendOperationException(BackendErrorKind.Unavailable, $"Could not enumerate active display paths (error {result}).", monitorId, platformCode: result.ToString());
+        foreach (var path in paths.Take((int)pathCount))
+        {
+            var sourceName = new Native.SourceDeviceName
+            {
+                Header = Native.CreateHeader(Native.GetSourceNameType, Marshal.SizeOf<Native.SourceDeviceName>(), path.Source.AdapterId, path.Source.Id),
+                ViewGdiDeviceName = string.Empty
+            };
+            var sourceResult = Native.DisplayConfigGetDeviceInfo(ref sourceName);
+            Trace.TraceInformation($"display.hdr.path.source display={displayName} result={sourceResult} source={sourceName.ViewGdiDeviceName} target={path.Target.Id}");
+            if (sourceResult == 0 && string.Equals(sourceName.ViewGdiDeviceName, displayName, StringComparison.OrdinalIgnoreCase))
+                return path.Target;
+        }
+        throw new BackendOperationException(BackendErrorKind.Unavailable, $"No active DisplayConfig target maps to '{displayName}'.", monitorId);
     }
 
     private static IReadOnlyList<DisplayMode> EnumerateModes(
@@ -450,6 +514,79 @@ public sealed class WindowsDisplaySettingsBackend : IPlatformDisplaySettingsBack
 
     private static class Native
     {
+        internal const int GetSourceNameType = 1;
+        internal const int GetAdvancedColorInfo2Type = 15;
+        internal const int SetHdrStateType = 16;
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct Luid { public uint LowPart; public int HighPart; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct DeviceInfoHeader { public int Type; public uint Size; public Luid AdapterId; public uint Id; }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        internal struct SourceDeviceName
+        {
+            public DeviceInfoHeader Header;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string ViewGdiDeviceName;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct GetAdvancedColorInfo { public DeviceInfoHeader Header; public uint Value; public uint ColorEncoding; public uint BitsPerColorChannel; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct GetAdvancedColorInfo2
+        {
+            public DeviceInfoHeader Header;
+            public uint Value;
+            public uint ColorEncoding;
+            public uint BitsPerColorChannel;
+            public uint ActiveColorMode;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct SetHdrState { public DeviceInfoHeader Header; public uint Value; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct PathSourceInfo { public Luid AdapterId; public uint Id; public uint ModeInfoIndex; public uint StatusFlags; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct Rational { public uint Numerator; public uint Denominator; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct PathTargetInfo
+        {
+            public Luid AdapterId; public uint Id; public uint ModeInfoIndex;
+            public uint OutputTechnology; public uint Rotation; public uint Scaling;
+            public Rational RefreshRate; public uint ScanLineOrdering;
+            [MarshalAs(UnmanagedType.Bool)] public bool TargetAvailable;
+            public uint StatusFlags;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct PathInfo { public PathSourceInfo Source; public PathTargetInfo Target; public uint Flags; }
+
+        [StructLayout(LayoutKind.Sequential, Size = 64)]
+        internal struct ModeInfo { private long _reserved; }
+
+        internal static DeviceInfoHeader CreateHeader(int type, int size, Luid adapterId, uint id) =>
+            new() { Type = type, Size = checked((uint)size), AdapterId = adapterId, Id = id };
+
+        [DllImport("user32.dll", ExactSpelling = true)]
+        internal static extern int GetDisplayConfigBufferSizes(uint flags, out uint numPathArrayElements, out uint numModeInfoArrayElements);
+
+        [DllImport("user32.dll", ExactSpelling = true)]
+        internal static extern int QueryDisplayConfig(uint flags, ref uint numPathArrayElements, [Out] PathInfo[] pathArray, ref uint numModeInfoArrayElements, [Out] ModeInfo[] modeInfoArray, IntPtr currentTopologyId, uint reserved);
+
+        [DllImport("user32.dll", ExactSpelling = true)]
+        internal static extern int DisplayConfigGetDeviceInfo(ref SourceDeviceName requestPacket);
+
+        [DllImport("user32.dll", ExactSpelling = true)]
+        internal static extern int DisplayConfigGetDeviceInfo(ref GetAdvancedColorInfo2 requestPacket);
+
+        [DllImport("user32.dll", ExactSpelling = true)]
+        internal static extern int DisplayConfigSetDeviceInfo(ref SetHdrState requestPacket);
+
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode, Pack = 2)]
         internal struct DevMode
         {
