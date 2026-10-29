@@ -4,12 +4,14 @@ using Avalonia.Controls;
 using Avalonia.Threading;
 using MonitorControl.Core.Services;
 using MonitorControl.App.ViewModels;
+using MonitorControl.App.Services;
 
 namespace MonitorControl.App;
 
 public partial class MainWindow : Window
 {
     private readonly ControlViewModel? _viewModel;
+    private readonly WindowSettingsStore _windowSettingsStore = new();
 
     public MainWindow()
     {
@@ -23,8 +25,30 @@ public partial class MainWindow : Window
         _viewModel.ConfirmInputSourceAsync = ConfirmInputSourceAsync;
         _viewModel.ConfirmDisplayModeTrialAsync = ConfirmDisplayModeTrialAsync;
         DataContext = _viewModel;
+        Opened += RestoreWindowSettingsAsync;
         Opened += OnOpened;
+        Closing += SaveWindowSettings;
         Closed += OnClosed;
+    }
+
+    private async void RestoreWindowSettingsAsync(object? sender, EventArgs eventArgs)
+    {
+        try
+        {
+            var settings = await _windowSettingsStore.LoadAsync();
+            if (settings is null) return;
+            Width = Math.Clamp(settings.Width, MinWidth, 4096);
+            Height = Math.Clamp(settings.Height, MinHeight, 2160);
+            Position = new Avalonia.PixelPoint((int)settings.X, (int)settings.Y);
+            if (_viewModel is not null) _viewModel.IsProfilesTab = settings.IsProfilesTab;
+        }
+        catch { }
+    }
+
+    private void SaveWindowSettings(object? sender, WindowClosingEventArgs eventArgs)
+    {
+        try { _windowSettingsStore.Save(this, _viewModel?.IsProfilesTab ?? false); }
+        catch { }
     }
 
     private async void OnOpened(object? sender, EventArgs eventArgs)
@@ -42,6 +66,16 @@ public partial class MainWindow : Window
             _viewModel.ConfirmInputSourceAsync = null;
             _viewModel.ConfirmDisplayModeTrialAsync = null;
         }
+    }
+
+    private void OnControlTabClick(object? sender, Avalonia.Interactivity.RoutedEventArgs eventArgs)
+    {
+        if (_viewModel is not null) _viewModel.IsProfilesTab = false;
+    }
+
+    private void OnProfilesTabClick(object? sender, Avalonia.Interactivity.RoutedEventArgs eventArgs)
+    {
+        if (_viewModel is not null) _viewModel.IsProfilesTab = true;
     }
 
     private async Task<bool> ConfirmInputSourceAsync(VcpControlViewModel control)

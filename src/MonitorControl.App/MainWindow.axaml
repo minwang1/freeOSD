@@ -31,14 +31,16 @@
         <Grid Grid.Row="1" ColumnDefinitions="210,*">
             <Border Grid.Column="0" Background="White" BorderBrush="#DDE3EC" BorderThickness="0,0,1,0" Padding="12">
                 <StackPanel Spacing="6">
-                    <Button Content="◉  控制" HorizontalContentAlignment="Left" Classes="nav-selected" />
-                    <Button Content="▣  预设与自动化" HorizontalContentAlignment="Left" IsEnabled="False" />
+                    <Button Content="◉  控制" HorizontalContentAlignment="Left" Classes="nav-selected"
+                            Click="OnControlTabClick" />
+                    <Button Content="▣  预设与自动化" HorizontalContentAlignment="Left"
+                            Click="OnProfilesTabClick" />
                     <Button Content="◈  识别与诊断" HorizontalContentAlignment="Left" IsEnabled="False" />
                     <Button Content="⚙  设置" HorizontalContentAlignment="Left" IsEnabled="False" />
                 </StackPanel>
             </Border>
 
-            <ScrollViewer Grid.Column="1" Padding="28">
+            <ScrollViewer Grid.Column="1" Padding="28" IsVisible="{Binding IsControlTab}">
                 <StackPanel Spacing="18" MaxWidth="900" HorizontalAlignment="Left">
                     <StackPanel Spacing="4">
                         <TextBlock Text="控制" FontSize="26" FontWeight="SemiBold" />
@@ -168,6 +170,40 @@
                                        IsVisible="{Binding HasNoRefreshRateModes}" />
                             <Button Content="重试恢复上一次设置" Command="{Binding RetryRefreshRateRestoreCommand}"
                                     IsVisible="{Binding HasRefreshRateRestoreFailure}" HorizontalAlignment="Left" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+            <ScrollViewer Grid.Column="1" Padding="28" IsVisible="{Binding IsProfilesTab}">
+                <StackPanel Spacing="18" MaxWidth="900" HorizontalAlignment="Left">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="预设与自动化" FontSize="26" FontWeight="SemiBold" />
+                        <TextBlock Text="保存并管理显示器预设。自动化规则将在后续阶段加入。" Foreground="#687386" />
+                    </StackPanel>
+                    <Border IsVisible="{Binding HasMonitors}" Background="White" BorderBrush="#DDE3EC" BorderThickness="1" CornerRadius="10" Padding="22">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="显示器预设" FontSize="18" FontWeight="SemiBold" />
+                            <TextBlock Text="保存当前已确认的显示器控件值。应用时会逐项写入并验证。" Foreground="#687386" TextWrapping="Wrap" />
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <TextBox PlaceholderText="预设名称" Text="{Binding ProfileName, Mode=TwoWay}" />
+                                <Button Grid.Column="1" Content="保存当前设置" Command="{Binding SaveProfileCommand}" />
+                            </Grid>
+                            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                                <ComboBox ItemsSource="{Binding Profiles}" SelectedItem="{Binding SelectedProfile, Mode=TwoWay}">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate x:DataType="core:MonitorProfile"><TextBlock Text="{Binding Name}" /></DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                                <Button Grid.Column="1" Content="应用预设" Command="{Binding ApplyProfileCommand}" />
+                                <Button Grid.Column="2" Content="删除" Command="{Binding DeleteProfileCommand}" />
+                            </Grid>
+                            <TextBlock Text="{Binding ProfileStatus}" Foreground="#687386" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+                    <Border IsVisible="{Binding HasNoMonitors}" Background="White" BorderBrush="#DDE3EC" BorderThickness="1" CornerRadius="10" Padding="22">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="连接显示器后即可创建和应用预设。" FontSize="17" FontWeight="SemiBold" />
+                            <TextBlock Text="请先扫描并选择可访问的显示器。" Foreground="#687386" />
                         </StackPanel>
                     </Border>
                 </StackPanel>

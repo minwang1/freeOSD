@@ -12,6 +12,7 @@ using MonitorControl.Core.Abstractions;
 using MonitorControl.Core.Models;
 using MonitorControl.Core.Services;
 using MonitorControl.App.Diagnostics;
+using MonitorControl.App.Services;
 
 namespace MonitorControl.App.ViewModels;
 
@@ -23,6 +24,7 @@ public sealed class ControlViewModel : ObservableObject
     private readonly IMonitorBackend _backend;
     private readonly IPlatformDisplaySettingsBackend? _displaySettingsBackend;
     private readonly RefreshRateTrialCoordinator? _refreshRateTrialCoordinator;
+    private readonly ProfileStore _profileStore;
     private readonly SemaphoreSlim _deviceGate = new(1, 1);
     private MonitorDescriptor? _selectedMonitor;
     private bool _isLoading;
@@ -31,6 +33,11 @@ public sealed class ControlViewModel : ObservableObject
     private bool _settingSelectionInternally;
     private long _loadVersion;
     private string _statusText = "就绪。";
+    private string _profileName = "";
+    private string _profileStatus = "";
+    private bool _isProfilesTab;
+    private MonitorProfile? _selectedProfile;
+    private bool _isLoadingProfiles;
     private bool _isLoadingRefreshRates;
     private bool _canSetRefreshRate;
     private bool _canSetResolution;
@@ -48,11 +55,13 @@ public sealed class ControlViewModel : ObservableObject
     public ControlViewModel(
         IMonitorBackend backend,
         IPlatformDisplaySettingsBackend? displaySettingsBackend = null,
-        RefreshRateTrialCoordinator? refreshRateTrialCoordinator = null)
+        RefreshRateTrialCoordinator? refreshRateTrialCoordinator = null,
+        ProfileStore? profileStore = null)
     {
         _backend = backend ?? throw new ArgumentNullException(nameof(backend));
         _displaySettingsBackend = displaySettingsBackend;
         _refreshRateTrialCoordinator = refreshRateTrialCoordinator;
+        _profileStore = profileStore ?? new ProfileStore();
         if (_refreshRateTrialCoordinator is not null)
         {
             _refreshRateTrialCoordinator.StateChanged += OnRefreshRateTrialStateChanged;
@@ -62,6 +71,10 @@ public sealed class ControlViewModel : ObservableObject
         ApplyResolutionCommand = new AsyncCommand(ApplyResolutionAsync, CanApplyResolution);
         RetryRefreshRateRestoreCommand = new AsyncCommand(RetryRefreshRateRestoreAsync,
             () => _restoreFailureTrialId is not null);
+        SaveProfileCommand = new AsyncCommand(SaveProfileAsync, () => SelectedMonitor is not null && !string.IsNullOrWhiteSpace(ProfileName));
+        ApplyProfileCommand = new AsyncCommand(ApplyProfileAsync, () => SelectedMonitor is not null && SelectedProfile is not null && !IsLoading);
+        DeleteProfileCommand = new AsyncCommand(DeleteProfileAsync, () => SelectedProfile is not null);
+        _ = LoadProfilesAsync();
     }
 
     public ObservableCollection<MonitorDescriptor> Monitors { get; } = [];
@@ -73,6 +86,24 @@ public sealed class ControlViewModel : ObservableObject
     public ICommand ApplyRefreshRateCommand { get; }
     public ICommand ApplyResolutionCommand { get; }
     public ICommand RetryRefreshRateRestoreCommand { get; }
+    public ObservableCollection<MonitorProfile> Profiles { get; } = [];
+    public ICommand SaveProfileCommand { get; }
+    public ICommand ApplyProfileCommand { get; }
+    public ICommand DeleteProfileCommand { get; }
+    public string ProfileName { get => _profileName; set { if (SetField(ref _profileName, value)) RaiseProfileCommands(); } }
+    public string ProfileStatus { get => _profileStatus; private set => SetField(ref _profileStatus, value); }
+    public bool IsProfilesTab
+    {
+        get => _isProfilesTab;
+        set
+        {
+            if (!SetField(ref _isProfilesTab, value)) return;
+            OnPropertyChanged(nameof(IsControlTab));
+        }
+    }
+    public bool IsControlTab => !IsProfilesTab;
+    public MonitorProfile? SelectedProfile { get => _selectedProfile; set { if (SetField(ref _selectedProfile, value)) RaiseProfileCommands(); } }
+    public bool IsLoadingProfiles { get => _isLoadingProfiles; private set => SetField(ref _isLoadingProfiles, value); }
 
     public bool HasRefreshRateSection => _displaySettingsBackend is not null;
     public bool HasRefreshRateModes => RefreshRateModes.Count > 0;
@@ -217,6 +248,7 @@ public sealed class ControlViewModel : ObservableObject
         {
             if (!SetField(ref _selectedMonitor, value)) return;
             RaiseSelectionProperties();
+            RaiseProfileCommands();
             if (!_settingSelectionInternally && value is not null)
             {
                 _ = LoadSelectedMonitorAsync(value);
@@ -559,6 +591,96 @@ public sealed class ControlViewModel : ObservableObject
                 IsLoadingRefreshRates = false;
             }
         }
+    }
+
+    private async Task LoadProfilesAsync()
+    {
+        IsLoadingProfiles = true;
+        try
+        {
+            var profiles = await _profileStore.LoadAllAsync();
+            Profiles.Clear();
+            foreach (var profile in profiles) Profiles.Add(profile);
+            ProfileStatus = $"已加载 {Profiles.Count} 个预设。";
+        }
+        catch (Exception exception) { ProfileStatus = $"读取预设失败：{exception.Message}"; }
+        finally { IsLoadingProfiles = false; RaiseProfileCommands(); }
+    }
+
+    private async Task SaveProfileAsync()
+    {
+        var monitor = SelectedMonitor;
+        if (monitor is null || string.IsNullOrWhiteSpace(ProfileName)) return;
+        var values = new Dictionary<byte, uint>();
+        foreach (var control in ContinuousControls.Concat(DiscreteControls))
+            if (control.TryGetConfirmedValue(out var value)) values[control.Code] = value;
+        if (values.Count == 0) { ProfileStatus = "没有可保存的已确认控件值。"; return; }
+        try
+        {
+            var profile = new MonitorProfile(ProfileStore.CurrentSchemaVersion, ProfileName.Trim(), DateTimeOffset.UtcNow,
+                monitor.Id.Value, values, new Dictionary<string, IdentifiedControlMetadata>());
+            await _profileStore.SaveAsync(profile);
+            ProfileName = "";
+            await LoadProfilesAsync();
+            SelectedProfile = Profiles.FirstOrDefault(item => string.Equals(item.Name, profile.Name, StringComparison.OrdinalIgnoreCase));
+            ProfileStatus = $"已保存预设“{profile.Name}”，包含 {values.Count} 项。";
+        }
+        catch (Exception exception) { ProfileStatus = $"保存预设失败：{exception.Message}"; }
+    }
+
+    private async Task DeleteProfileAsync()
+    {
+        if (SelectedProfile is not { } profile) return;
+        try
+        {
+            await _profileStore.DeleteAsync(profile.Name);
+            SelectedProfile = null;
+            await LoadProfilesAsync();
+            ProfileStatus = $"已删除预设“{profile.Name}”。";
+        }
+        catch (Exception exception) { ProfileStatus = $"删除预设失败：{exception.Message}"; }
+    }
+
+    private async Task ApplyProfileAsync()
+    {
+        var monitor = SelectedMonitor;
+        var profile = SelectedProfile;
+        if (monitor is null || profile is null) return;
+        var controls = ContinuousControls.Concat(DiscreteControls).ToDictionary(control => control.Code);
+        var issues = new List<string>();
+        var applied = 0;
+        foreach (var entry in profile.VcpValues.OrderBy(pair => pair.Key))
+        {
+            if (!controls.TryGetValue(entry.Key, out var control))
+            {
+                issues.Add($"VCP 0x{entry.Key:X2}: 当前显示器没有该控件。");
+                continue;
+            }
+            try
+            {
+                await _deviceGate.WaitAsync();
+                try
+                {
+                    await _backend.WriteVcpAsync(monitor.Id, entry.Key, entry.Value);
+                    var actual = await _backend.ReadVcpAsync(monitor.Id, entry.Key);
+                    if (actual.Current != entry.Value) throw new InvalidOperationException($"读回值为 {actual.Current}，目标值为 {entry.Value}。");
+                    control.SetReadValue(actual.Current);
+                    applied++;
+                }
+                finally { _deviceGate.Release(); }
+            }
+            catch (Exception exception) { issues.Add($"{control.Name} (0x{entry.Key:X2}): {exception.Message}"); }
+        }
+        ProfileStatus = issues.Count == 0
+            ? $"已应用预设“{profile.Name}”，共 {applied} 项。"
+            : $"预设部分应用：成功 {applied} 项，失败 {issues.Count} 项。\n" + string.Join("\n", issues);
+    }
+
+    private void RaiseProfileCommands()
+    {
+        if (SaveProfileCommand is AsyncCommand save) save.RaiseCanExecuteChanged();
+        if (ApplyProfileCommand is AsyncCommand apply) apply.RaiseCanExecuteChanged();
+        if (DeleteProfileCommand is AsyncCommand delete) delete.RaiseCanExecuteChanged();
     }
 
     private async Task ApplyRefreshRateAsync()
@@ -1177,6 +1299,12 @@ public sealed class VcpControlViewModel : ObservableObject
     internal bool IsSelectionCurrent(uint value) => _isContinuous
         ? (uint)Math.Round(Value, MidpointRounding.AwayFromZero) == value
         : SelectedOption?.Value == value;
+
+    internal bool TryGetConfirmedValue(out uint value)
+    {
+        value = _confirmedValue.GetValueOrDefault();
+        return IsReadable && _confirmedValue.HasValue;
+    }
 
     internal CancellationToken RestartDebounce()
     {
