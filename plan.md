@@ -107,6 +107,23 @@ python/                         # 不属于活动项目；用户计划后续删�
 - 移植前台应用识别、程序绑定、默认预设回退；自动应用预设不得切换输入源。
 - 验收：失败和进程切换场景不会阻塞 UI；刷新率变更必有可靠回滚计时；功能在不支持的设备路径上正确降级。
 
+### P3.5：Windows GPU 色彩校正（RGB SDR VCGT 首版实现中；MHC2/HDR 后续评估）
+
+- RGB 调整是本阶段首要目标，与 DDC/CI RGB 增益分开：首版限定 SDR，生成独立 ICC 并通过 Windows 校准加载器应用 VCGT RGB 曲线；HDR/MHC2 暂缓，避免在缺少可信 ST.2086 显示器亮度元数据时生成误导性 profile。当前实机日志确认校准加载器开启、VCGT 能力受支持。
+- 首版在设置页枚举活动显示器已关联的 ICC profile，支持导入、应用默认项和恢复原始默认 profile；备份持久化到当前用户数据目录。导入、应用和恢复已用 Windows 实机日志确认成功。
+- ICC 只读解析已实现：校验文件头/标签边界，并报告 profile class、色彩空间、PCS、厂商/型号字段及 VCGT/MS00/MHC2 标签信息。VCGT 摘要识别公式/采样表结构、通道数、每通道采样点数和位宽；MHC2 摘要检查 LUT 点数、矩阵/LUT 数据块类型及边界。均不会读取校准数值，也不验证数值正确性或写入 profile。
+- 活动显示器路径的只读能力探测已实现：查询 VCGT/MHC2 支持、MHC2 LUT/矩阵尺寸、系统级 WCS 校准管理加载器状态，并显示当前 HDR 状态；不修改显示状态。当前日志确认 VCGT/MHC2 查询成功且能力为支持、WCS 加载器开启、HDR 支持但关闭；实际校准曲线和画面效果仍未验证，且结果仍需在命名的 Windows/GPU/驱动矩阵中解释。
+- 实施顺序：
+  1. 定义 RGB 调整参数模型、默认中性值、范围/步进、输入校验和重置行为；UI 区分待应用值与当前已应用状态。
+  2. 从首次应用前保存的原始显示器 profile 派生新的 profile 文件，保留原文件及原始 metadata，不直接覆盖源 ICC；写入每通道 VCGT 曲线和应用参数摘要并校验 ICC/tag table 边界。公式型 VCGT 和已有 MHC2 profile 暂不作为基底。
+  3. 将生成的 profile 安装并关联为默认项；沿用现有备份，应用失败立即回滚并读回确认。中性值使用 identity VCGT 曲线。
+  4. 加入取消/重置、重复应用、切换显示器和恢复原 profile 的状态处理；为应用生成文件做有界清理，不删除用户导入 profile。
+  5. 由用户在实际显示器上验证单通道及组合调整、恢复、HDR 开关影响，并用日志确认配置文件路径和关联读回；未验证的 GPU/驱动组合明确标为未支持/未验证。
+- RGB 流程稳定后再做：亮度/白点高级校准、配置保存与预设联动、基于可信测量元数据的 MHC2/HDR 实机兼容验证、多显示器独立 profile 生命周期。任何扩展都不得修改用户原 ICC 或跳过原 profile 恢复。
+- 验收：Windows build 20348+；HDR 关闭且系统 VCGT 能力/校准加载器可用时，RGB 每通道及组合调整能生成独立 VCGT profile、应用并恢复原 profile，日志能确认目标设备和活动 profile；用户已确认颜色可见变化。HDR 下不应用 VCGT。RGB 可见效果在当前 Windows 显示器上已验证；MHC2/HDR 和多显示器效果仍未验证。
+- 下一工作包：清理旧的 MonitorControl 生成 profile，保留当前应用项和原始 profile；然后把 RGB 参数纳入保存预设及自动化规则，并验证重启/切换显示器后的恢复行为。
+- 技术评估见 [`docs/windows-gpu-color-correction-spike.md`](docs/windows-gpu-color-correction-spike.md)。
+
 ### P4：OSD/VCP 识别、报告和高级诊断
 
 - 迁移状态采集、完整 VCP 快照、相邻状态差异、候选映射汇总。
@@ -234,6 +251,7 @@ P6 发布、性能与旧实现退役
 | P2 登录启动 | 已实现，待增量构建验证 | Windows 设置页通过当前用户 Run 项启用/关闭，无需管理员权限；Linux 明确显示不支持。 |
 | P3 Windows HDR | 已实现，用户已验证切换生效 | 通过活动 DisplayConfig 路径和 HDR 专用状态接口查询/切换，写入后读回并记录诊断日志；旧版 Advanced Color/WCG 状态不再冒充 HDR。 |
 | P3 Windows 应用自动切换 | 已实现首版，待 Windows 实机验证 | 已安装程序搜索选择、添加规则时使用上一个前台程序、逐程序规则、未命中默认预设、预设删除联动和版本化用户存储；自动切换开关状态跨启动恢复。自动应用逐项验证并跳过输入源 VCP 0x60；Linux 不支持。 |
+| P3.5 Windows ICC/GPU 色彩 | RGB SDR VCGT 控件、独立 profile 生成、应用/读回/失败恢复已实现；单显示器 RGB 可见效果已由用户确认 | HDR/MHC2、多显示器及预设/自动化联动仍待验证；多次调整留下的生成 profile 需要清理。 |
 | 根目录 Git 忽略规则 | 已完成 | 已忽略 .NET `bin/obj`、IDE 文件及 Python 缓存/打包产物。 |
 | Windows/Linux 后端 | 未开始 | 需契约冻结和后续分派。 |
 | .NET 构建 | 已通过 | `dotnet build .\MonitorControl.sln --no-restore -m:1 -v:minimal`，临时设置 `AVALONIA_TELEMETRY_OPTOUT=1`；0 警告、0 错误。 |

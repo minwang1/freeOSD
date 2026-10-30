@@ -7,6 +7,8 @@
 - Avalonia 主窗口和基础控制页已建立。
 - Windows DXVA2 DDC/CI 后端初版支持显示器发现、能力读取、常用 VCP 读取与写入。
 - Windows 显示设置页将分辨率与刷新率分开选择和应用；分辨率切换保持当前刷新率，刷新率切换保持当前分辨率，两项均采用 15 秒试用、确认保留或自动恢复。
+- Windows 设置页可查看并应用当前显示器已关联的 ICC 色彩配置文件；首次应用会保存原默认配置，提供读回验证的恢复操作。导入、应用、恢复已在 Windows 实机通过中性 sRGB profile 验证；实际画面校准效果仍未验证。
+- Windows 设置页可导入 `.icc`/`.icm` 文件并关联当前显示器；系统安装 profile 需要管理员权限。SDR 模式提供 RGB 增益控件，通过生成独立 ICC/VCGT profile 调整，每通道范围 50–150%，HDR 开启时禁止应用。首次应用保存原始 profile，失败自动回滚，支持手动恢复。RGB 可见变化已在一台 Windows 显示器上由用户确认；其他显示器和 HDR 尚未验证。只读摘要会校验 ICC 文件头和标签边界，并显示 VCGT/MS00/MHC2 结构信息。页面还报告 Windows VCGT/MHC2 能力、系统校准加载器状态和 HDR 状态。仓库提供[导入流程样例](docs/test-profile/test-srgb.icm)，它不含校准曲线，只用于检查导入、关联和恢复流程。
 - 目前可见的控制项取决于显示器声明的能力：亮度、对比度、RGB 增益、色彩预设和输入源。
 - 控制能力读取、VCP 写入、写后读回、分辨率/刷新率模式验证、应用及恢复结果会写入本地诊断日志，路径为 `%LOCALAPPDATA%\MonitorControl\Logs\monitor-control.log`；日志按大小轮转，不包含原始显示器能力转储。DDC/CI 读回暂时失败时会有限重试；仍无法确认的值会标记为未知。
 - Linux DDC/CI 后端尚未实现。Linux 上的 UI 会显示当前平台后端尚不可用。
@@ -22,6 +24,8 @@ src/MonitorControl.Platform.Windows/    Windows DXVA2/DDC/CI 后端
 ```
 
 Core 契约边界和安全约定见 [`docs/core-contracts.md`](docs/core-contracts.md)。
+显示器图像模式、色温和 DDC/CI 故障排查见[常见问题](docs/faq.md)。
+Windows GPU 色彩校正（ICC/VCGT/MHC2）的技术评估见 [`docs/windows-gpu-color-correction-spike.md`](docs/windows-gpu-color-correction-spike.md)。
 
 ## 开发环境与命令
 

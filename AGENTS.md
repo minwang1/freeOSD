@@ -40,6 +40,7 @@ Use dependency direction `App -> Core <- Platform adapters`; App composes the se
 - Keep hardware-independent tests isolated from physical monitor requirements. Use mocks/fakes for backend contracts and restoration flows.
 - Update `README.md`, `UI-DESIGN.md`, and `plan.md` when user-visible behavior, supported platforms, or migration scope changes.
 - Prefer small, reviewable work packages. Avoid editing files assigned to another concurrent task; coordinate shared solution/project changes before touching them.
+- Use incremental builds and reuse the project's default `bin/` and `obj/` output directories. Do not set a new `OutputPath`, create per-build artifact folders, or clean build outputs unless the user asks.
 
 ## Commands (once the solution exists)
 

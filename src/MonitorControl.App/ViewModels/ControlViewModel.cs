@@ -27,12 +27,14 @@ public sealed class ControlViewModel : ObservableObject
     private readonly RefreshRateTrialCoordinator? _refreshRateTrialCoordinator;
     private readonly ProfileStore _profileStore;
     private readonly ILoginStartupService? _loginStartupService;
+    private readonly IDisplayColorProfileService? _displayColorProfileService;
     private readonly IForegroundApplicationMonitor? _foregroundApplicationMonitor;
     private readonly AutomationRuleStore _automationRuleStore;
     private readonly SemaphoreSlim _deviceGate = new(1, 1);
     private MonitorDescriptor? _selectedMonitor;
     private bool _isLoading;
     private bool _isScanning;
+    private bool _isRefreshing;
     private bool _hasScanError;
     private bool _settingSelectionInternally;
     private long _loadVersion;
@@ -41,6 +43,20 @@ public sealed class ControlViewModel : ObservableObject
     private string _profileStatus = "";
     private bool _isProfilesTab;
     private bool _isSettingsTab;
+    private DisplayColorProfile? _selectedDisplayColorProfile;
+    private string _displayColorProfileStatus = "选择显示器以读取关联的 ICC 配置文件。";
+    private string _displayColorProfileInspectionStatus = "选择配置文件后，可查看 ICC 文件头和校准标签摘要。";
+    private string _displayColorPipelineStatus = "色彩管线能力尚未读取。";
+    private int _redRgbGainPercent = 100;
+    private int _greenRgbGainPercent = 100;
+    private int _blueRgbGainPercent = 100;
+    private int _appliedRedRgbGainPercent = 100;
+    private int _appliedGreenRgbGainPercent = 100;
+    private int _appliedBlueRgbGainPercent = 100;
+    private bool _hasKnownAppliedRgbGains;
+    private bool _supportsVcgtAdjustment;
+    private bool _calibrationLoaderEnabled;
+    private string _rgbGainStatus = "当前活动 profile 的 RGB 校准状态尚未读取。";
     private bool _loginStartupEnabled;
     private string _loginStartupStatus = "";
     private MonitorProfile? _selectedProfile;
@@ -77,13 +93,15 @@ public sealed class ControlViewModel : ObservableObject
         ILoginStartupService? loginStartupService = null,
         IForegroundApplicationMonitor? foregroundApplicationMonitor = null,
         AutomationRuleStore? automationRuleStore = null,
-        IInstalledApplicationCatalog? installedApplicationCatalog = null)
+        IInstalledApplicationCatalog? installedApplicationCatalog = null,
+        IDisplayColorProfileService? displayColorProfileService = null)
     {
         _backend = backend ?? throw new ArgumentNullException(nameof(backend));
         _displaySettingsBackend = displaySettingsBackend;
         _refreshRateTrialCoordinator = refreshRateTrialCoordinator;
         _profileStore = profileStore ?? new ProfileStore();
         _loginStartupService = loginStartupService;
+        _displayColorProfileService = displayColorProfileService;
         _foregroundApplicationMonitor = foregroundApplicationMonitor;
         _installedApplicationCatalog = installedApplicationCatalog;
         _automationRuleStore = automationRuleStore ?? new AutomationRuleStore();
@@ -103,6 +121,12 @@ public sealed class ControlViewModel : ObservableObject
         DeleteProfileCommand = new AsyncCommand(DeleteProfileAsync, () => SelectedProfile is not null);
         AddAutomationRuleCommand = new AsyncCommand(AddAutomationRuleAsync, CanAddAutomationRule);
         RemoveAutomationRuleCommand = new AsyncCommand(RemoveAutomationRuleAsync, () => SelectedAutomationRule is not null);
+        RefreshDisplayColorProfilesCommand = new AsyncCommand(LoadDisplayColorProfilesAsync, () => _displayColorProfileService?.IsSupported == true && SelectedMonitor is not null);
+        ApplyDisplayColorProfileCommand = new AsyncCommand(ApplyDisplayColorProfileAsync, () => SelectedDisplayColorProfile is not null && SelectedMonitor is not null);
+        RestoreDisplayColorProfileCommand = new AsyncCommand(RestoreDisplayColorProfileAsync, () => _hasOriginalDisplayColorProfile && SelectedMonitor is not null);
+        ImportDisplayColorProfileCommand = new AsyncCommand(ImportDisplayColorProfileAsync, () => _displayColorProfileService?.IsSupported == true && SelectedMonitor is not null);
+        ApplyRgbAdjustmentCommand = new AsyncCommand(ApplyRgbAdjustmentAsync, CanApplyRgbAdjustment);
+        ResetRgbAdjustmentCommand = new AsyncCommand(() => { ResetRgbAdjustment(); return Task.CompletedTask; });
         if (_foregroundApplicationMonitor is not null)
         {
             _foregroundApplicationMonitor.ForegroundApplicationChanged += OnForegroundApplicationChanged;
@@ -123,7 +147,7 @@ public sealed class ControlViewModel : ObservableObject
     public ICommand RetryRefreshRateRestoreCommand { get; }
     public ICommand ToggleHdrCommand { get; }
     public bool IsHdrSupported { get => _hdrSupported; private set => SetField(ref _hdrSupported, value); }
-    public bool IsHdrEnabled { get => _hdrEnabled; private set => SetField(ref _hdrEnabled, value); }
+    public bool IsHdrEnabled { get => _hdrEnabled; private set { if (SetField(ref _hdrEnabled, value) && ApplyRgbAdjustmentCommand is AsyncCommand command) command.RaiseCanExecuteChanged(); } }
     public string HdrStatus { get => _hdrStatus; private set => SetField(ref _hdrStatus, value); }
     public ObservableCollection<MonitorProfile> Profiles { get; } = [];
     public bool HasProfiles => Profiles.Count > 0;
@@ -134,6 +158,39 @@ public sealed class ControlViewModel : ObservableObject
     public ObservableCollection<ApplicationProfileRule> AutomationRules { get; } = [];
     public ICommand AddAutomationRuleCommand { get; }
     public ICommand RemoveAutomationRuleCommand { get; }
+    public ObservableCollection<DisplayColorProfile> DisplayColorProfiles { get; } = [];
+    public DisplayColorProfile? SelectedDisplayColorProfile
+    {
+        get => _selectedDisplayColorProfile;
+        set
+        {
+            if (!SetField(ref _selectedDisplayColorProfile, value)) return;
+            if (ApplyDisplayColorProfileCommand is AsyncCommand command) command.RaiseCanExecuteChanged();
+            _ = InspectSelectedDisplayColorProfileAsync(value);
+        }
+    }
+    public string DisplayColorProfileStatus { get => _displayColorProfileStatus; private set => SetField(ref _displayColorProfileStatus, value); }
+    public string DisplayColorProfileInspectionStatus { get => _displayColorProfileInspectionStatus; private set => SetField(ref _displayColorProfileInspectionStatus, value); }
+    public string DisplayColorPipelineStatus { get => _displayColorPipelineStatus; private set => SetField(ref _displayColorPipelineStatus, value); }
+    public int RedRgbGainPercent { get => _redRgbGainPercent; set { if (SetField(ref _redRgbGainPercent, value)) OnRgbGainChanged(); } }
+    public int GreenRgbGainPercent { get => _greenRgbGainPercent; set { if (SetField(ref _greenRgbGainPercent, value)) OnRgbGainChanged(); } }
+    public int BlueRgbGainPercent { get => _blueRgbGainPercent; set { if (SetField(ref _blueRgbGainPercent, value)) OnRgbGainChanged(); } }
+    public string RedRgbGainLabel => $"红色 {RedRgbGainPercent}%";
+    public string GreenRgbGainLabel => $"绿色 {GreenRgbGainPercent}%";
+    public string BlueRgbGainLabel => $"蓝色 {BlueRgbGainPercent}%";
+    public string RgbGainStatus { get => _rgbGainStatus; private set => SetField(ref _rgbGainStatus, value); }
+    public bool IsRgbAdjustmentPending => !_hasKnownAppliedRgbGains || RedRgbGainPercent != _appliedRedRgbGainPercent || GreenRgbGainPercent != _appliedGreenRgbGainPercent || BlueRgbGainPercent != _appliedBlueRgbGainPercent;
+    public string RgbGainPendingStatus => !_hasKnownAppliedRgbGains ? "当前活动配置的 RGB 参数未知；应用后会保存本应用的参数。" : IsRgbAdjustmentPending ? "参数有更改，尚未应用。" : "参数与当前应用的 RGB 配置一致。";
+    public ICommand ApplyRgbAdjustmentCommand { get; }
+    public ICommand ResetRgbAdjustmentCommand { get; }
+    private bool _hasOriginalDisplayColorProfile;
+    public bool IsDisplayColorProfileSupported => _displayColorProfileService?.IsSupported == true;
+    public bool HasOriginalDisplayColorProfile { get => _hasOriginalDisplayColorProfile; private set { if (!SetField(ref _hasOriginalDisplayColorProfile, value)) return; if (RestoreDisplayColorProfileCommand is AsyncCommand command) command.RaiseCanExecuteChanged(); } }
+    public ICommand RefreshDisplayColorProfilesCommand { get; }
+    public ICommand ApplyDisplayColorProfileCommand { get; }
+    public ICommand RestoreDisplayColorProfileCommand { get; }
+    public ICommand ImportDisplayColorProfileCommand { get; }
+    public Func<Task<string?>>? PickDisplayColorProfileFileAsync { get; set; }
     public bool IsAutomationSupported => _foregroundApplicationMonitor is not null;
     public IInstalledApplicationCatalog? InstalledApplicationCatalog => _installedApplicationCatalog;
     public ValueTask<string?> GetPreviousForegroundExecutablePathAsync() =>
@@ -226,6 +283,273 @@ public sealed class ControlViewModel : ObservableObject
             _loginStartupEnabled = !enabled;
             OnPropertyChanged(nameof(LoginStartupEnabled));
             LoginStartupStatus = $"更新登录启动设置失败：{exception.Message}";
+        }
+    }
+
+    private string? GetSelectedDisplayName(MonitorDescriptor? monitor) =>
+        string.IsNullOrWhiteSpace(monitor?.ConnectionDescription) ? null : monitor.ConnectionDescription;
+
+    private async Task LoadDisplayColorProfilesAsync()
+    {
+        if (_displayColorProfileService?.IsSupported != true || SelectedMonitor is not { } monitor || GetSelectedDisplayName(monitor) is not { } displayName)
+        {
+            DisplayColorProfileStatus = "此 Windows 版本或当前显示器不支持 ICC profile 管理。";
+            return;
+        }
+        try
+        {
+            var active = await _displayColorProfileService.GetActiveProfilePathAsync(displayName);
+            var profiles = await _displayColorProfileService.GetProfilesAsync(displayName);
+            DisplayColorProfiles.Clear();
+            foreach (var profile in profiles) DisplayColorProfiles.Add(profile);
+            SelectedDisplayColorProfile = DisplayColorProfiles.FirstOrDefault(profile => string.Equals(profile.Path, active, StringComparison.OrdinalIgnoreCase)) ?? DisplayColorProfiles.FirstOrDefault();
+            HasOriginalDisplayColorProfile = await _displayColorProfileService.HasOriginalProfileAsync(displayName);
+            DisplayColorProfileStatus = profiles.Count == 0 ? "此显示器没有可选择的已关联 ICC 配置文件。" : $"已读取 {profiles.Count} 个配置文件。当前：{Path.GetFileName(active)}";
+            await LoadDisplayColorPipelineStatusAsync(displayName, monitor);
+        }
+        catch (Exception exception) { DisplayColorProfileStatus = $"读取显示器 ICC 配置文件失败：{exception.Message}"; }
+    }
+
+    private async Task LoadDisplayColorPipelineStatusAsync(string displayName, MonitorDescriptor monitor)
+    {
+        if (_displayColorProfileService is null)
+        {
+            DisplayColorPipelineStatus = "当前平台未提供 Windows 色彩管线能力查询。";
+            return;
+        }
+
+        try
+        {
+            var capabilities = await _displayColorProfileService.GetPipelineCapabilitiesAsync(displayName);
+            _supportsVcgtAdjustment = capabilities.VcgtQuerySucceeded && capabilities.SupportsVcgt;
+            _calibrationLoaderEnabled = capabilities.CalibrationManagementQuerySucceeded && capabilities.IsCalibrationManagementEnabled;
+            if (ApplyRgbAdjustmentCommand is AsyncCommand rgbCommand) rgbCommand.RaiseCanExecuteChanged();
+            var vcgt = capabilities.VcgtQuerySucceeded
+                ? capabilities.SupportsVcgt ? "支持" : "不支持"
+                : $"查询失败 (0x{capabilities.VcgtHResult:X8})";
+            var mhc2 = capabilities.Mhc2QuerySucceeded
+                ? capabilities.SupportsMhc2
+                    ? $"支持（LUT {capabilities.RegammaLutEntryCount} 项，矩阵 {capabilities.CscXyzMatrixRows}×{capabilities.CscXyzMatrixColumns}）"
+                    : "不支持"
+                : $"查询失败 (0x{capabilities.Mhc2HResult:X8})";
+            var calibrationManagement = capabilities.CalibrationManagementQuerySucceeded
+                ? capabilities.IsCalibrationManagementEnabled ? "已开启" : "已关闭"
+                : $"查询失败 (Win32 {capabilities.CalibrationManagementWin32Error})";
+            var hdr = "未知";
+            if (_displaySettingsBackend is not null)
+            {
+                var hdrState = await _displaySettingsBackend.GetHdrStateAsync(monitor.Id);
+                hdr = hdrState.IsSupported ? hdrState.IsEnabled ? "已开启" : "已关闭" : "不支持或无法读取";
+            }
+
+            DisplayColorPipelineStatus = $"只读能力：VCGT {vcgt}；系统校准加载器 {calibrationManagement}；MHC2 {mhc2}；HDR {hdr}。能力支持不代表所选 ICC 含有效校准数据或画面已发生变化。";
+            DiagnosticLog.Write("INFO", "display.icc.pipeline.displayed", $"display={displayName}; scope={capabilities.Scope}; vcgtQuery={capabilities.VcgtQuerySucceeded}; supportsVcgt={capabilities.SupportsVcgt}; calibrationStateQuery={capabilities.CalibrationManagementQuerySucceeded}; calibrationManagementEnabled={capabilities.IsCalibrationManagementEnabled}; calibrationWin32Error={capabilities.CalibrationManagementWin32Error}; mhc2Query={capabilities.Mhc2QuerySucceeded}; supportsMhc2={capabilities.SupportsMhc2}; hdr={hdr}");
+        }
+        catch (Exception exception)
+        {
+            DisplayColorPipelineStatus = $"读取色彩管线能力失败：{exception.Message}";
+            DiagnosticLog.Write("WARN", "display.icc.pipeline.failed", $"display={displayName}; error={exception}");
+        }
+    }
+
+    private async Task InspectSelectedDisplayColorProfileAsync(DisplayColorProfile? profile)
+    {
+        if (profile is null)
+        {
+            DisplayColorProfileInspectionStatus = "选择配置文件后，可查看 ICC 文件头和校准标签摘要。";
+            return;
+        }
+
+        DisplayColorProfileInspectionStatus = "正在只读检查 ICC 文件…";
+        try
+        {
+            var inspection = await Task.Run(() => IccProfileInspector.Inspect(profile.Path));
+            if (!ReferenceEquals(SelectedDisplayColorProfile, profile)) return;
+            if (profile.IsDefault)
+            {
+                _hasKnownAppliedRgbGains = inspection.RgbGainAdjustment is not null;
+                if (inspection.RgbGainAdjustment is { } applied)
+                {
+                    _appliedRedRgbGainPercent = applied.RedPercent;
+                    _appliedGreenRgbGainPercent = applied.GreenPercent;
+                    _appliedBlueRgbGainPercent = applied.BluePercent;
+                    RedRgbGainPercent = applied.RedPercent;
+                    GreenRgbGainPercent = applied.GreenPercent;
+                    BlueRgbGainPercent = applied.BluePercent;
+                    RgbGainStatus = $"当前活动 profile 已应用 RGB：R {applied.RedPercent}% / G {applied.GreenPercent}% / B {applied.BluePercent}%。";
+                }
+                else RgbGainStatus = "当前 profile 不是由本应用生成，无法从 ICC 通用数据还原其 RGB 参数。";
+                OnPropertyChanged(nameof(IsRgbAdjustmentPending));
+                OnPropertyChanged(nameof(RgbGainPendingStatus));
+            }
+            static string TagSummary(IccProfileTag? tag) => tag is null ? "无" : $"有（{tag.Size:N0} 字节）";
+            var vcgt = inspection.VcgtSummary;
+            var vcgtStructure = vcgt is null
+                ? "无"
+                : !vcgt.IsStructurallyValid
+                    ? $"结构异常：{vcgt.ValidationMessage}"
+                    : vcgt.Encoding == "Formula"
+                        ? "公式型，3 通道"
+                        : $"采样表，{vcgt.ChannelCount} 通道，{vcgt.SamplesPerChannel} 点/通道，{vcgt.EntryBits} 位";
+            var mhc2 = inspection.Mhc2Summary;
+            var mhc2Structure = mhc2 is null
+                ? "无"
+                : !mhc2.IsStructurallyValid
+                    ? $"结构异常：{mhc2.ValidationMessage}"
+                    : $"{mhc2.LutEntryCount} 点，矩阵 {(mhc2.HasMatrix ? "有" : "无")}，RGB LUT {(mhc2.HasRedLut ? "有" : "无")}/{(mhc2.HasGreenLut ? "有" : "无")}/{(mhc2.HasBlueLut ? "有" : "无")}";
+            DisplayColorProfileInspectionStatus =
+                $"{Path.GetFileName(inspection.FilePath)} · {inspection.ProfileClass} · {inspection.ColorSpace} → {inspection.ConnectionSpace} · {inspection.DeclaredSize:N0} 字节\n" +
+                $"VCGT：{TagSummary(inspection.VcgtTag)}；结构：{vcgtStructure}　MS00：{TagSummary(inspection.Ms00Tag)}　MHC2：{TagSummary(inspection.Mhc2Tag)}；结构：{mhc2Structure}";
+            DiagnosticLog.Write("INFO", "display.icc.inspection.completed", $"profile={inspection.FilePath}; bytes={inspection.DeclaredSize}; class={inspection.ProfileClass}; colorSpace={inspection.ColorSpace}; pcs={inspection.ConnectionSpace}; vcgt={inspection.VcgtTag?.Size}; vcgtEncoding={vcgt?.Encoding}; vcgtChannels={vcgt?.ChannelCount}; vcgtSamples={vcgt?.SamplesPerChannel}; vcgtEntryBits={vcgt?.EntryBits}; vcgtValid={vcgt?.IsStructurallyValid}; vcgtValidation={vcgt?.ValidationMessage}; ms00={inspection.Ms00Tag?.Size}; mhc2={inspection.Mhc2Tag?.Size}; mhc2LutEntries={mhc2?.LutEntryCount}; mhc2Matrix={mhc2?.HasMatrix}; mhc2RedLut={mhc2?.HasRedLut}; mhc2GreenLut={mhc2?.HasGreenLut}; mhc2BlueLut={mhc2?.HasBlueLut}; mhc2Valid={mhc2?.IsStructurallyValid}; mhc2Validation={mhc2?.ValidationMessage}");
+        }
+        catch (Exception exception)
+        {
+            if (!ReferenceEquals(SelectedDisplayColorProfile, profile)) return;
+            DisplayColorProfileInspectionStatus = $"ICC 文件只读检查失败：{exception.Message}";
+            DiagnosticLog.Write("WARN", "display.icc.inspection.failed", $"profile={profile.Path}; error={exception}");
+        }
+    }
+
+    private async Task ApplyDisplayColorProfileAsync()
+    {
+        if (_displayColorProfileService is null || SelectedMonitor is not { } monitor || SelectedDisplayColorProfile is not { } profile || GetSelectedDisplayName(monitor) is not { } displayName) return;
+        try
+        {
+            DisplayColorProfileStatus = $"正在应用“{profile.Name}”…";
+            await _displayColorProfileService.ApplyProfileAsync(displayName, profile.Path);
+            HasOriginalDisplayColorProfile = await _displayColorProfileService.HasOriginalProfileAsync(displayName);
+            await LoadDisplayColorProfilesAsync();
+            DisplayColorProfileStatus = $"已应用“{profile.Name}”。画面效果取决于 Windows 颜色管线和应用支持。";
+            DiagnosticLog.Write("INFO", "display.icc.apply.completed", $"display={displayName}; profile={profile.Path}");
+        }
+        catch (Exception exception)
+        {
+            DisplayColorProfileStatus = $"应用 ICC 配置文件失败：{exception.Message}";
+            DiagnosticLog.Write("ERROR", "display.icc.apply.failed", $"error={exception}");
+        }
+    }
+
+    private bool CanApplyRgbAdjustment() => _displayColorProfileService?.IsSupported == true &&
+        SelectedMonitor is not null && !IsHdrEnabled && _supportsVcgtAdjustment && _calibrationLoaderEnabled;
+
+    private void OnRgbGainChanged()
+    {
+        OnPropertyChanged(nameof(RedRgbGainLabel));
+        OnPropertyChanged(nameof(GreenRgbGainLabel));
+        OnPropertyChanged(nameof(BlueRgbGainLabel));
+        OnPropertyChanged(nameof(IsRgbAdjustmentPending));
+        OnPropertyChanged(nameof(RgbGainPendingStatus));
+        if (ApplyRgbAdjustmentCommand is AsyncCommand command) command.RaiseCanExecuteChanged();
+    }
+
+    private void ResetRgbAdjustment()
+    {
+        RedRgbGainPercent = 100;
+        GreenRgbGainPercent = 100;
+        BlueRgbGainPercent = 100;
+    }
+
+    private async Task ApplyRgbAdjustmentAsync()
+    {
+        if (_displayColorProfileService is null || SelectedMonitor is not { } monitor ||
+            GetSelectedDisplayName(monitor) is not { } displayName) return;
+        if (_displaySettingsBackend is not null)
+        {
+            var hdrState = await _displaySettingsBackend.GetHdrStateAsync(monitor.Id);
+            IsHdrEnabled = hdrState.IsSupported && hdrState.IsEnabled;
+            if (IsHdrEnabled)
+            {
+                RgbGainStatus = "当前 HDR 已开启；SDR VCGT RGB 校准不适用于 HDR，请关闭 HDR 后再应用。";
+                return;
+            }
+        }
+
+        try
+        {
+            var gains = new RgbGainAdjustment(RedRgbGainPercent, GreenRgbGainPercent, BlueRgbGainPercent);
+            gains.Validate();
+            RgbGainStatus = "正在生成并应用 SDR RGB 校准 profile…";
+            DiagnosticLog.Write("INFO", "display.icc.rgb.apply.started", $"display={displayName}; red={gains.RedPercent}; green={gains.GreenPercent}; blue={gains.BluePercent}");
+            var profilePath = await _displayColorProfileService.ApplyRgbAdjustmentAsync(displayName, gains);
+            _appliedRedRgbGainPercent = gains.RedPercent;
+            _appliedGreenRgbGainPercent = gains.GreenPercent;
+            _appliedBlueRgbGainPercent = gains.BluePercent;
+            _hasKnownAppliedRgbGains = true;
+            OnPropertyChanged(nameof(IsRgbAdjustmentPending));
+            OnPropertyChanged(nameof(RgbGainPendingStatus));
+            RgbGainStatus = $"已应用 RGB 校准：R {gains.RedPercent}% / G {gains.GreenPercent}% / B {gains.BluePercent}%。Windows 已读回活动 profile；画面效果需实机确认。";
+            HasOriginalDisplayColorProfile = await _displayColorProfileService.HasOriginalProfileAsync(displayName);
+            await LoadDisplayColorProfilesAsync();
+            DiagnosticLog.Write("INFO", "display.icc.rgb.apply.readback", $"display={displayName}; profile={profilePath}; red={gains.RedPercent}; green={gains.GreenPercent}; blue={gains.BluePercent}");
+        }
+        catch (Exception exception)
+        {
+            RgbGainStatus = $"RGB 校准应用失败：{exception.Message}";
+            DiagnosticLog.Write("ERROR", "display.icc.rgb.apply.failed", $"display={displayName}; error={exception}");
+        }
+    }
+
+    private async Task ImportDisplayColorProfileAsync()
+    {
+        if (_displayColorProfileService is null)
+        {
+            DisplayColorProfileStatus = "当前平台未提供 ICC 配置文件导入功能。";
+            DiagnosticLog.Write("ERROR", "display.icc.import.unavailable", "service=missing");
+            return;
+        }
+        if (PickDisplayColorProfileFileAsync is null)
+        {
+            DisplayColorProfileStatus = "文件选择器尚未初始化，请关闭并重新打开设置页后重试。";
+            DiagnosticLog.Write("ERROR", "display.icc.import.unavailable", "filePicker=missing");
+            return;
+        }
+        if (SelectedMonitor is not { } monitor || GetSelectedDisplayName(monitor) is not { } displayName)
+        {
+            DisplayColorProfileStatus = "请先扫描并选择一个显示器，再导入 ICC 配置文件。";
+            DiagnosticLog.Write("WARN", "display.icc.import.unavailable", "display=missing");
+            return;
+        }
+        try
+        {
+            DiagnosticLog.Write("INFO", "display.icc.import.started", $"display={displayName}");
+            var sourcePath = await PickDisplayColorProfileFileAsync();
+            if (string.IsNullOrWhiteSpace(sourcePath))
+            {
+                DiagnosticLog.Write("INFO", "display.icc.import.cancelled", $"display={displayName}");
+                return;
+            }
+            DiagnosticLog.Write("INFO", "display.icc.import.file.selected", $"display={displayName}; source={sourcePath}");
+            DisplayColorProfileStatus = "正在安装并关联 ICC 配置文件…";
+            var installedPath = await _displayColorProfileService.ImportProfileAsync(displayName, sourcePath);
+            DiagnosticLog.Write("INFO", "display.icc.import.installed", $"display={displayName}; profile={installedPath}");
+            await LoadDisplayColorProfilesAsync();
+            SelectedDisplayColorProfile = DisplayColorProfiles.FirstOrDefault(profile => string.Equals(profile.Path, installedPath, StringComparison.OrdinalIgnoreCase));
+            DisplayColorProfileStatus = $"已导入并关联“{Path.GetFileName(sourcePath)}”。它尚未设为默认；如需应用，请点击“应用配置文件”。";
+            DiagnosticLog.Write("INFO", "display.icc.import.completed", $"display={displayName}; profile={installedPath}");
+        }
+        catch (Exception exception)
+        {
+            DisplayColorProfileStatus = $"导入 ICC 配置文件失败：{exception.Message}";
+            DiagnosticLog.Write("ERROR", "display.icc.import.failed", $"error={exception}");
+        }
+    }
+
+    private async Task RestoreDisplayColorProfileAsync()
+    {
+        if (_displayColorProfileService is null || SelectedMonitor is not { } monitor || GetSelectedDisplayName(monitor) is not { } displayName) return;
+        try
+        {
+            DisplayColorProfileStatus = "正在恢复原 ICC 配置文件…";
+            await _displayColorProfileService.RestoreOriginalProfileAsync(displayName);
+            HasOriginalDisplayColorProfile = false;
+            await LoadDisplayColorProfilesAsync();
+            DisplayColorProfileStatus = "已恢复并验证原 ICC 配置文件。";
+            DiagnosticLog.Write("INFO", "display.icc.restore.completed", $"display={displayName}");
+        }
+        catch (Exception exception)
+        {
+            DisplayColorProfileStatus = $"恢复 ICC 配置文件失败，可重试：{exception.Message}";
+            DiagnosticLog.Write("ERROR", "display.icc.restore.failed", $"error={exception}");
         }
     }
     public MonitorProfile? SelectedProfile { get => _selectedProfile; set { if (SetField(ref _selectedProfile, value)) { RaiseProfileCommands(); RaiseAutomationCommands(); } } }
@@ -386,6 +710,7 @@ public sealed class ControlViewModel : ObservableObject
             if (!SetField(ref _selectedMonitor, value)) return;
             RaiseSelectionProperties();
             RaiseProfileCommands();
+            if (ApplyRgbAdjustmentCommand is AsyncCommand rgbCommand) rgbCommand.RaiseCanExecuteChanged();
             if (!_settingSelectionInternally && value is not null)
             {
                 _ = LoadSelectedMonitorAsync(value);
@@ -409,6 +734,18 @@ public sealed class ControlViewModel : ObservableObject
             OnPropertyChanged(nameof(ConnectionStatus));
         }
     }
+
+    public bool IsRefreshing
+    {
+        get => _isRefreshing;
+        private set
+        {
+            if (!SetField(ref _isRefreshing, value)) return;
+            OnPropertyChanged(nameof(IsUiInteractionEnabled));
+        }
+    }
+
+    public bool IsUiInteractionEnabled => !IsRefreshing;
 
     public bool IsScanning
     {
@@ -452,6 +789,7 @@ public sealed class ControlViewModel : ObservableObject
     {
         if (IsScanning) return;
         IsScanning = true;
+        IsRefreshing = Monitors.Count > 0;
         IsLoading = true;
         HasScanError = false;
         StatusText = "正在查找显示器…";
@@ -471,15 +809,18 @@ public sealed class ControlViewModel : ObservableObject
             }
 
             var previousId = SelectedMonitor?.Id;
-            Monitors.Clear();
+            // Keep the last usable monitor list visible until discovery succeeds.
+            var discoveredIds = discovered.Select(monitor => monitor.Id).ToHashSet();
+            for (var index = Monitors.Count - 1; index >= 0; index--)
+                if (!discoveredIds.Contains(Monitors[index].Id)) Monitors.RemoveAt(index);
             foreach (var monitor in discovered)
-            {
-                Monitors.Add(monitor);
-            }
+                if (!Monitors.Any(existing => existing.Id == monitor.Id)) Monitors.Add(monitor);
             OnPropertyChanged(nameof(HasNoMonitors));
 
-            var selected = discovered.FirstOrDefault(monitor => monitor.Id == previousId)
-                ?? discovered.FirstOrDefault();
+            // Reuse the selected descriptor instance when it remains present. Clearing and
+            // rebuilding this collection briefly resets ComboBox.SelectedItem to null.
+            var selected = Monitors.FirstOrDefault(monitor => monitor.Id == previousId)
+                ?? Monitors.FirstOrDefault();
             _settingSelectionInternally = true;
             try
             {
@@ -499,6 +840,7 @@ public sealed class ControlViewModel : ObservableObject
             {
                 await LoadMonitorDataAsync(selected, loadVersion);
                 await LoadRefreshRateModesAsync(selected, loadVersion);
+                await LoadDisplayColorProfilesAsync();
             }
         }
         catch (Exception exception)
@@ -506,8 +848,11 @@ public sealed class ControlViewModel : ObservableObject
             if (loadVersion == Volatile.Read(ref _loadVersion))
             {
                 HasScanError = true;
-                ClearControls();
-                StatusText = $"扫描显示器失败：{exception.Message}";
+                // Preserve existing monitor data and controls when a background refresh fails.
+                if (SelectedMonitor is null) ClearControls();
+                StatusText = SelectedMonitor is null
+                    ? $"扫描显示器失败：{exception.Message}"
+                    : $"刷新失败，仍显示上次读取的数据：{exception.Message}";
             }
         }
         finally
@@ -517,6 +862,7 @@ public sealed class ControlViewModel : ObservableObject
                 IsLoading = false;
             }
             IsScanning = false;
+            IsRefreshing = false;
         }
     }
 
@@ -529,13 +875,13 @@ public sealed class ControlViewModel : ObservableObject
         {
             await LoadMonitorDataAsync(monitor, loadVersion);
             await LoadRefreshRateModesAsync(monitor, loadVersion);
+            await LoadDisplayColorProfilesAsync();
         }
         catch (Exception exception)
         {
             if (loadVersion == Volatile.Read(ref _loadVersion))
             {
-                ClearControls();
-                StatusText = $"读取 {monitor.Name} 失败：{exception.Message}";
+                StatusText = $"刷新 {monitor.Name} 失败，仍显示上次读取的数据：{exception.Message}";
             }
         }
         finally
@@ -957,9 +1303,22 @@ public sealed class ControlViewModel : ObservableObject
             var ruleIdentity = rule?.ExecutablePath ?? $"default:{profile.Name}";
             var key = $"{ruleIdentity}|{profile.Name}|{monitor.Id.Value}";
             if (string.Equals(_lastAutomationKey, key, StringComparison.OrdinalIgnoreCase)) return;
-            _lastAutomationKey = key;
             AutomationStatus = $"检测到 {Path.GetFileName(eventArgs.ExecutablePath)}，正在应用“{profile.Name}”…";
-            await ApplyProfileValuesAsync(monitor, profile, skipInputSource: true);
+            try
+            {
+                await ApplyProfileValuesAsync(monitor, profile, skipInputSource: true);
+                // Only suppress repeated foreground notifications after a complete apply.
+                // A partial failure must remain retryable the next time this app is activated.
+                if (AutomationStatus.StartsWith("已应用预设", StringComparison.Ordinal) ||
+                    AutomationStatus.StartsWith("预设部分应用：成功", StringComparison.Ordinal) &&
+                    AutomationStatus.EndsWith("失败 0 项。", StringComparison.Ordinal))
+                    _lastAutomationKey = key;
+            }
+            catch (Exception exception)
+            {
+                AutomationStatus = $"自动应用预设“{profile.Name}”失败：{exception.Message}";
+                DiagnosticLog.Write("ERROR", "automation.profile.apply.failed", $"profile={profile.Name}; monitor={monitor.Id.Value}; error={exception}");
+            }
         });
     }
 
@@ -1398,6 +1757,10 @@ public sealed class ControlViewModel : ObservableObject
         OnPropertyChanged(nameof(HasNoMonitors));
         OnPropertyChanged(nameof(ConnectionStatus));
         OnPropertyChanged(nameof(HasNoContinuousControls));
+        if (RefreshDisplayColorProfilesCommand is AsyncCommand refresh) refresh.RaiseCanExecuteChanged();
+        if (ImportDisplayColorProfileCommand is AsyncCommand import) import.RaiseCanExecuteChanged();
+        if (ApplyDisplayColorProfileCommand is AsyncCommand apply) apply.RaiseCanExecuteChanged();
+        if (RestoreDisplayColorProfileCommand is AsyncCommand restore) restore.RaiseCanExecuteChanged();
     }
 
     private static (string Name, uint Minimum, VcpValueOption[] Options) Describe(byte code) => code switch
