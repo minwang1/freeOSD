@@ -148,6 +148,8 @@ public sealed partial class ControlViewModel : ObservableObject
         if (_displayColorProfileService is null || SelectedMonitor is not { } monitor || SelectedDisplayColorProfile is not { } profile || GetSelectedDisplayName(monitor) is not { } displayName) return;
         try
         {
+            CancelRgbPreviewDebounce();
+            await RestorePendingRgbPreviewAsync();
             DisplayColorProfileStatus = $"正在应用“{profile.Name}”…";
             await _displayColorProfileService.ApplyProfileAsync(displayName, profile.Path);
             HasOriginalDisplayColorProfile = await _displayColorProfileService.HasOriginalProfileAsync(displayName);
@@ -173,6 +175,98 @@ public sealed partial class ControlViewModel : ObservableObject
         OnPropertyChanged(nameof(IsRgbAdjustmentPending));
         OnPropertyChanged(nameof(RgbGainPendingStatus));
         if (ApplyRgbAdjustmentCommand is AsyncCommand command) command.RaiseCanExecuteChanged();
+        ScheduleRgbPreview();
+    }
+
+    private void ScheduleRgbPreview()
+    {
+        CancelRgbPreviewDebounce();
+        if (_displayColorProfileService?.IsSupported != true || SelectedMonitor is null || IsHdrEnabled) return;
+        var debounce = new CancellationTokenSource();
+        _rgbPreviewDebounce = debounce;
+        _ = PreviewRgbAdjustmentAfterDelayAsync(debounce);
+    }
+
+    private void CancelRgbPreviewDebounce()
+    {
+        var debounce = _rgbPreviewDebounce;
+        _rgbPreviewDebounce = null;
+        if (debounce is null) return;
+        debounce.Cancel();
+    }
+
+    private async Task PreviewRgbAdjustmentAfterDelayAsync(CancellationTokenSource debounce)
+    {
+        try
+        {
+            await Task.Delay(350, debounce.Token);
+            if (!ReferenceEquals(_rgbPreviewDebounce, debounce) || SelectedMonitor is not { } monitor ||
+                GetSelectedDisplayName(monitor) is not { } displayName || _displayColorProfileService is null) return;
+            if (_displaySettingsBackend is not null)
+            {
+                var hdr = await _displaySettingsBackend.GetHdrStateAsync(monitor.Id);
+                IsHdrEnabled = hdr.IsSupported && hdr.IsEnabled;
+                if (IsHdrEnabled) return;
+            }
+            var gains = new RgbGainAdjustment(RedRgbGainPercent, GreenRgbGainPercent, BlueRgbGainPercent);
+            gains.Validate();
+            if (_rgbPreviewDisplayName is not null && !string.Equals(_rgbPreviewDisplayName, displayName, StringComparison.OrdinalIgnoreCase))
+                await RestoreRgbPreviewForDisplayAsync(_rgbPreviewDisplayName);
+            RgbGainStatus = "正在预览 RGB 调整（临时 Gamma Ramp）…";
+            DiagnosticLog.Write("INFO", "display.icc.rgb.preview.started", $"display={displayName}; red={gains.RedPercent}; green={gains.GreenPercent}; blue={gains.BluePercent}");
+            await _displayColorProfileService.PreviewRgbAdjustmentAsync(displayName, gains, debounce.Token);
+            if (!ReferenceEquals(_rgbPreviewDebounce, debounce) || SelectedMonitor is not { } currentMonitor ||
+                !string.Equals(GetSelectedDisplayName(currentMonitor), displayName, StringComparison.OrdinalIgnoreCase))
+            {
+                await RestoreRgbPreviewForDisplayAsync(displayName);
+                return;
+            }
+            _rgbPreviewDisplayName = gains == RgbGainAdjustment.Neutral ? null : displayName;
+            RgbGainStatus = $"临时预览：R {gains.RedPercent}% / G {gains.GreenPercent}% / B {gains.BluePercent}%。点击“应用 RGB 调整”可保存为 ICC profile。";
+            DiagnosticLog.Write("INFO", "display.icc.rgb.preview.completed", $"display={displayName}; red={gains.RedPercent}; green={gains.GreenPercent}; blue={gains.BluePercent}; readback=true");
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception)
+        {
+            RgbGainStatus = $"RGB 临时预览不可用：{exception.Message}";
+            DiagnosticLog.Write("WARN", "display.icc.rgb.preview.failed", $"error={exception}");
+        }
+        finally
+        {
+            if (ReferenceEquals(_rgbPreviewDebounce, debounce)) _rgbPreviewDebounce = null;
+            debounce.Dispose();
+        }
+    }
+
+    public bool HasPendingRgbPreview => _rgbPreviewDisplayName is not null;
+
+    public async Task<bool> RestoreRgbPreviewBeforeExitAsync()
+    {
+        CancelRgbPreviewDebounce();
+        if (_rgbPreviewDisplayName is { } displayName)
+            await RestoreRgbPreviewForDisplayAsync(displayName);
+        return _rgbPreviewDisplayName is null;
+    }
+
+    private async Task RestorePendingRgbPreviewAsync()
+    {
+        await RestoreRgbPreviewBeforeExitAsync();
+    }
+
+    private async Task RestoreRgbPreviewForDisplayAsync(string displayName)
+    {
+        if (_displayColorProfileService is null) return;
+        try
+        {
+            await _displayColorProfileService.RestoreRgbPreviewAsync(displayName);
+            if (string.Equals(_rgbPreviewDisplayName, displayName, StringComparison.OrdinalIgnoreCase)) _rgbPreviewDisplayName = null;
+            DiagnosticLog.Write("INFO", "display.icc.rgb.preview.restored", $"display={displayName}");
+        }
+        catch (Exception exception)
+        {
+            RgbGainStatus = $"恢复临时 RGB 预览失败：{exception.Message}";
+            DiagnosticLog.Write("ERROR", "display.icc.rgb.preview.restore_failed", $"display={displayName}; error={exception}");
+        }
     }
 
     private void ResetRgbAdjustment()
@@ -201,9 +295,20 @@ public sealed partial class ControlViewModel : ObservableObject
         {
             var gains = new RgbGainAdjustment(RedRgbGainPercent, GreenRgbGainPercent, BlueRgbGainPercent);
             gains.Validate();
+            if (PromptRgbProfileFileNameAsync is null)
+            {
+                RgbGainStatus = "保存对话框尚未初始化，请关闭并重新打开设置页后重试。";
+                return;
+            }
+            var defaultFileName = await _displayColorProfileService.GetDefaultRgbProfileFileNameAsync(displayName, gains);
+            var profileFileName = await PromptRgbProfileFileNameAsync(defaultFileName);
+            if (string.IsNullOrWhiteSpace(profileFileName)) return;
+
+            CancelRgbPreviewDebounce();
+            await RestorePendingRgbPreviewAsync();
             RgbGainStatus = "正在生成并应用 SDR RGB 校准 profile…";
-            DiagnosticLog.Write("INFO", "display.icc.rgb.apply.started", $"display={displayName}; red={gains.RedPercent}; green={gains.GreenPercent}; blue={gains.BluePercent}");
-            var profilePath = await _displayColorProfileService.ApplyRgbAdjustmentAsync(displayName, gains);
+            DiagnosticLog.Write("INFO", "display.icc.rgb.apply.started", $"display={displayName}; fileName={profileFileName}; red={gains.RedPercent}; green={gains.GreenPercent}; blue={gains.BluePercent}");
+            var profilePath = await _displayColorProfileService.ApplyRgbAdjustmentAsync(displayName, gains, profileFileName);
             _appliedRedRgbGainPercent = gains.RedPercent;
             _appliedGreenRgbGainPercent = gains.GreenPercent;
             _appliedBlueRgbGainPercent = gains.BluePercent;
@@ -219,6 +324,19 @@ public sealed partial class ControlViewModel : ObservableObject
         {
             RgbGainStatus = $"RGB 校准应用失败：{exception.Message}";
             DiagnosticLog.Write("ERROR", "display.icc.rgb.apply.failed", $"display={displayName}; error={exception}");
+            if (_displayColorProfileService is not null)
+            {
+                try
+                {
+                    await _displayColorProfileService.PreviewRgbAdjustmentAsync(displayName,
+                        new RgbGainAdjustment(RedRgbGainPercent, GreenRgbGainPercent, BlueRgbGainPercent));
+                    _rgbPreviewDisplayName = displayName;
+                }
+                catch (Exception previewException)
+                {
+                    DiagnosticLog.Write("WARN", "display.icc.rgb.preview.restore_after_apply_failure", $"display={displayName}; error={previewException}");
+                }
+            }
         }
     }
 
@@ -272,6 +390,8 @@ public sealed partial class ControlViewModel : ObservableObject
         if (_displayColorProfileService is null || SelectedMonitor is not { } monitor || GetSelectedDisplayName(monitor) is not { } displayName) return;
         try
         {
+            CancelRgbPreviewDebounce();
+            await RestorePendingRgbPreviewAsync();
             DisplayColorProfileStatus = "正在恢复原 ICC 配置文件…";
             await _displayColorProfileService.RestoreOriginalProfileAsync(displayName);
             HasOriginalDisplayColorProfile = false;
@@ -283,6 +403,29 @@ public sealed partial class ControlViewModel : ObservableObject
         {
             DisplayColorProfileStatus = $"恢复 ICC 配置文件失败，可重试：{exception.Message}";
             DiagnosticLog.Write("ERROR", "display.icc.restore.failed", $"error={exception}");
+        }
+    }
+
+    private async Task DeleteGeneratedRgbProfileAsync()
+    {
+        if (!CanDeleteSelectedGeneratedRgbProfile || _displayColorProfileService is null ||
+            SelectedMonitor is not { } monitor || SelectedDisplayColorProfile is not { } profile ||
+            GetSelectedDisplayName(monitor) is not { } displayName) return;
+        if (ConfirmGeneratedRgbProfileDeletionAsync is null || !await ConfirmGeneratedRgbProfileDeletionAsync(profile.Name)) return;
+        try
+        {
+            DisplayColorProfileStatus = $"正在删除 RGB profile“{profile.Name}”…";
+            DiagnosticLog.Write("INFO", "display.icc.rgb.profile.delete.started", $"display={displayName}; profile={profile.Path}");
+            await _displayColorProfileService.DeleteGeneratedRgbProfileAsync(displayName, profile.Path);
+            SelectedDisplayColorProfile = null;
+            await LoadDisplayColorProfilesAsync();
+            DisplayColorProfileStatus = $"已删除 RGB profile“{profile.Name}”。";
+            DiagnosticLog.Write("INFO", "display.icc.rgb.profile.delete.completed", $"display={displayName}; profile={profile.Path}");
+        }
+        catch (Exception exception)
+        {
+            DisplayColorProfileStatus = $"删除 RGB profile 失败：{exception.Message}";
+            DiagnosticLog.Write("ERROR", "display.icc.rgb.profile.delete.failed", $"display={displayName}; profile={profile.Path}; error={exception}");
         }
     }
 }

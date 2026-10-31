@@ -8,6 +8,7 @@ using Avalonia.Threading;
 using Avalonia.Controls.Templates;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using MonitorControl.Core.Services;
 using MonitorControl.Core.Models;
 using MonitorControl.App.ViewModels;
@@ -34,12 +35,109 @@ public partial class MainWindow : Window
         _viewModel.ConfirmInputSourceAsync = ConfirmInputSourceAsync;
         _viewModel.ConfirmDisplayModeTrialAsync = ConfirmDisplayModeTrialAsync;
         _viewModel.AddAutomationRuleDialogAsync = AddAutomationRuleDialogAsync;
+        _viewModel.PickDisplayColorProfileFileAsync = PickDisplayColorProfileFileAsync;
+        _viewModel.PromptRgbProfileFileNameAsync = PromptRgbProfileFileNameAsync;
+        _viewModel.ConfirmGeneratedRgbProfileDeletionAsync = ConfirmGeneratedRgbProfileDeletionAsync;
         DataContext = _viewModel;
         Opened += RestoreWindowSettingsAsync;
         Opened += OnOpened;
         Closing += SaveWindowSettings;
         Closing += CloseToTray;
         Closed += OnClosed;
+    }
+
+    private async Task<string?> PickDisplayColorProfileFileAsync()
+    {
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "选择显示器 ICC/ICM 配置文件",
+            AllowMultiple = false,
+            FileTypeFilter =
+            [
+                new FilePickerFileType("ICC/ICM 配置文件") { Patterns = ["*.icc", "*.icm"] }
+            ]
+        });
+        var selectedFile = files.FirstOrDefault();
+        if (selectedFile is null) return null;
+        var localPath = selectedFile.TryGetLocalPath();
+        if (string.IsNullOrWhiteSpace(localPath))
+            throw new InvalidOperationException("The selected ICC/ICM file is not available as a local Windows file.");
+        return localPath;
+    }
+
+    private async Task<string?> PromptRgbProfileFileNameAsync(string defaultFileName)
+    {
+        var message = new TextBlock
+        {
+            Text = "为当前 RGB 调整设置 profile 文件名。应用后会安装并设为当前显示器的默认 ICC profile。",
+            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+            Margin = new Avalonia.Thickness(20, 18, 20, 8)
+        };
+        var fileNameBox = new TextBox { Text = defaultFileName, Margin = new Avalonia.Thickness(20, 0, 20, 8) };
+        var cancelButton = new Button { Content = "取消", MinWidth = 88 };
+        var saveButton = new Button { Content = "确认并应用", MinWidth = 110 };
+        var buttons = new StackPanel
+        {
+            Orientation = Avalonia.Layout.Orientation.Horizontal,
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+            Spacing = 10,
+            Margin = new Avalonia.Thickness(20, 8, 20, 16),
+            Children = { cancelButton, saveButton }
+        };
+        var dialog = new Window
+        {
+            Title = "保存 RGB profile",
+            Width = 520,
+            Height = 230,
+            MinWidth = 520,
+            MinHeight = 230,
+            MaxWidth = 520,
+            MaxHeight = 230,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false,
+            Content = new StackPanel { Spacing = 8, Children = { message, fileNameBox, buttons } }
+        };
+        cancelButton.Click += (_, _) => dialog.Close(false);
+        saveButton.Click += (_, _) => dialog.Close(true);
+        dialog.Opened += (_, _) => { fileNameBox.Focus(); fileNameBox.SelectAll(); };
+        var accepted = await dialog.ShowDialog<bool>(this);
+        return accepted ? fileNameBox.Text?.Trim() : null;
+    }
+
+    private async Task<bool> ConfirmGeneratedRgbProfileDeletionAsync(string profileName)
+    {
+        var message = new TextBlock
+        {
+            Text = $"确定删除 RGB profile“{profileName}”吗？",
+            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+            Margin = new Avalonia.Thickness(20, 18, 20, 12)
+        };
+        var cancelButton = new Button { Content = "取消", MinWidth = 88 };
+        var deleteButton = new Button { Content = "删除 profile", MinWidth = 110 };
+        var buttons = new StackPanel
+        {
+            Orientation = Avalonia.Layout.Orientation.Horizontal,
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+            Spacing = 10,
+            Margin = new Avalonia.Thickness(20, 8, 20, 16),
+            Children = { cancelButton, deleteButton }
+        };
+        var dialog = new Window
+        {
+            Title = "确认删除",
+            Width = 520,
+            Height = 220,
+            MinWidth = 520,
+            MinHeight = 220,
+            MaxWidth = 520,
+            MaxHeight = 220,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false,
+            Content = new StackPanel { Spacing = 8, Children = { message, buttons } }
+        };
+        cancelButton.Click += (_, _) => dialog.Close(false);
+        deleteButton.Click += (_, _) => dialog.Close(true);
+        return await dialog.ShowDialog<bool>(this);
     }
 
     private void CloseToTray(object? sender, WindowClosingEventArgs eventArgs)
@@ -85,13 +183,21 @@ public partial class MainWindow : Window
             _viewModel.ConfirmInputSourceAsync = null;
             _viewModel.ConfirmDisplayModeTrialAsync = null;
             _viewModel.AddAutomationRuleDialogAsync = null;
+            _viewModel.PickDisplayColorProfileFileAsync = null;
+            _viewModel.PromptRgbProfileFileNameAsync = null;
+            _viewModel.ConfirmGeneratedRgbProfileDeletionAsync = null;
             _viewModel.Dispose();
         }
     }
 
     private void OnControlTabClick(object? sender, Avalonia.Interactivity.RoutedEventArgs eventArgs)
     {
-        if (_viewModel is not null) _viewModel.IsProfilesTab = false;
+        if (_viewModel is not null) _viewModel.IsControlTab = true;
+    }
+
+    private void OnColorManagementTabClick(object? sender, Avalonia.Interactivity.RoutedEventArgs eventArgs)
+    {
+        if (_viewModel is not null) _viewModel.IsColorManagementTab = true;
     }
 
     private void OnProfilesTabClick(object? sender, Avalonia.Interactivity.RoutedEventArgs eventArgs)

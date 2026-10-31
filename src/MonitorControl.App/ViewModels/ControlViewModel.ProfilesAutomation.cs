@@ -45,16 +45,48 @@ public sealed partial class ControlViewModel : ObservableObject
         var values = new Dictionary<byte, uint>();
         foreach (var control in ContinuousControls.Concat(DiscreteControls))
             if (control.TryGetConfirmedValue(out var value)) values[control.Code] = value;
-        if (values.Count == 0) { ProfileStatus = "没有可保存的已确认控件值。"; return; }
         try
         {
+            RgbGainAdjustment? rgb = null;
+            string? colorProfilePath = null;
+            if (_displayColorProfileService?.IsSupported == true && GetSelectedDisplayName(monitor) is { } displayName)
+            {
+                var activePath = await _displayColorProfileService.GetActiveProfilePathAsync(displayName);
+                if (!string.IsNullOrWhiteSpace(activePath) && File.Exists(activePath))
+                {
+                    try
+                    {
+                        var inspection = await Task.Run(() => IccProfileInspector.Inspect(activePath));
+                        if (inspection.RgbGainAdjustment is { } appliedRgb) rgb = appliedRgb;
+                        else colorProfilePath = activePath;
+                    }
+                    catch (Exception inspectionException)
+                    {
+                        colorProfilePath = activePath;
+                        DiagnosticLog.Write("WARN", "profile.capture.icc-inspection-failed", $"profile={ProfileName.Trim()}; colorProfile={activePath}; action=save-active-profile-path; error={inspectionException.Message}");
+                    }
+                }
+            }
+            else if (_hasKnownAppliedRgbGains)
+            {
+                rgb = new RgbGainAdjustment(_appliedRedRgbGainPercent, _appliedGreenRgbGainPercent, _appliedBlueRgbGainPercent);
+            }
+            if (values.Count == 0 && rgb is null && colorProfilePath is null)
+            {
+                ProfileStatus = "没有可保存的已确认控件值或当前活动 ICC/RGB 设置。";
+                return;
+            }
+
             var profile = new MonitorProfile(ProfileStore.CurrentSchemaVersion, ProfileName.Trim(), DateTimeOffset.UtcNow,
-                monitor.Id.Value, values, new Dictionary<string, IdentifiedControlMetadata>());
+                monitor.Id.Value, values, new Dictionary<string, IdentifiedControlMetadata>(),
+                RgbGainAdjustment: rgb, ColorProfilePath: colorProfilePath);
             await _profileStore.SaveAsync(profile);
             ProfileName = "";
             await LoadProfilesAsync();
             SelectedProfile = Profiles.FirstOrDefault(item => string.Equals(item.Name, profile.Name, StringComparison.OrdinalIgnoreCase));
-            ProfileStatus = $"已保存预设“{profile.Name}”，包含 {values.Count} 项。";
+            ProfileStatus = $"已保存预设“{profile.Name}”，包含 {values.Count} 项 VCP 控件" +
+                (profile.RgbGainAdjustment is { } savedRgb ? $"及 RGB（{savedRgb.RedPercent}/{savedRgb.GreenPercent}/{savedRgb.BluePercent}%）" : "") +
+                (profile.ColorProfilePath is { } savedColorPath ? $"及 ICC（{Path.GetFileName(savedColorPath)}）" : "") + ".";
         }
         catch (Exception exception) { ProfileStatus = $"保存预设失败：{exception.Message}"; }
     }
@@ -95,7 +127,7 @@ public sealed partial class ControlViewModel : ObservableObject
         {
             if (skipInputSource && entry.Key == 0x60)
             {
-                issues.Add("自动化已跳过输入源 VCP 0x60。请在手动预设中更改输入源。");
+                DiagnosticLog.Write("INFO", "profile.vcp.apply.skipped", $"profile={profile.Name}; code=0x60; reason=automation-input-source-protected");
                 continue;
             }
             if (!controls.TryGetValue(entry.Key, out var control))
@@ -117,6 +149,98 @@ public sealed partial class ControlViewModel : ObservableObject
                 finally { _deviceGate.Release(); }
             }
             catch (Exception exception) { issues.Add($"{control.Name} (0x{entry.Key:X2}): {exception.Message}"); }
+        }
+
+        if (profile.ColorProfilePath is { } colorProfilePath && profile.RgbGainAdjustment is null)
+        {
+            if (!string.Equals(profile.MonitorIdentity, monitor.Id.Value, StringComparison.OrdinalIgnoreCase))
+            {
+                issues.Add("ICC 配置文件属于另一台显示器，已跳过以避免误应用。");
+                DiagnosticLog.Write("WARN", "profile.icc.apply.skipped", $"profile={profile.Name}; monitor={monitor.Id.Value}; colorProfile={colorProfilePath}; reason=monitor-identity-mismatch; automation={skipInputSource}");
+            }
+            else if (_displayColorProfileService?.IsSupported != true)
+            {
+                issues.Add("当前平台不支持 ICC 配置文件应用。");
+                DiagnosticLog.Write("WARN", "profile.icc.apply.skipped", $"profile={profile.Name}; monitor={monitor.Id.Value}; colorProfile={colorProfilePath}; reason=platform-unsupported; automation={skipInputSource}");
+            }
+            else
+            {
+                try
+                {
+                    var displayName = GetSelectedDisplayName(monitor)
+                        ?? throw new InvalidOperationException("无法确定显示器名称。");
+                    DiagnosticLog.Write("INFO", "profile.icc.apply.started", $"profile={profile.Name}; display={displayName}; colorProfile={colorProfilePath}; automation={skipInputSource}");
+                    await _displayColorProfileService.ApplyProfileAsync(displayName, colorProfilePath);
+                    var activeProfilePath = await _displayColorProfileService.GetActiveProfilePathAsync(displayName);
+                    if (!string.Equals(Path.GetFullPath(activeProfilePath ?? ""), Path.GetFullPath(colorProfilePath), StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException($"Windows 活动 ICC profile 读回不匹配：期望 {colorProfilePath}，实际 {activeProfilePath ?? "<none>"}。");
+                    DiagnosticLog.Write("INFO", "profile.icc.apply.completed", $"profile={profile.Name}; display={displayName}; activeProfile={activeProfilePath}; automation={skipInputSource}");
+                    applied++;
+                }
+                catch (Exception exception)
+                {
+                    DiagnosticLog.Write("ERROR", "profile.icc.apply.failed", $"profile={profile.Name}; monitor={monitor.Id.Value}; colorProfile={colorProfilePath}; automation={skipInputSource}; error={exception}");
+                    issues.Add($"ICC 配置文件：{exception.Message}");
+                }
+            }
+        }
+        else if (profile.ColorProfilePath is not null && profile.RgbGainAdjustment is not null)
+        {
+            DiagnosticLog.Write("WARN", "profile.color.settings.conflict", $"profile={profile.Name}; colorProfile={profile.ColorProfilePath}; rgb={profile.RgbGainAdjustment}; policy=rgb-adjustment-takes-precedence");
+        }
+
+        if (profile.RgbGainAdjustment is { } rgb)
+        {
+            if (!string.Equals(profile.MonitorIdentity, monitor.Id.Value, StringComparison.OrdinalIgnoreCase))
+            {
+                issues.Add("RGB 校准属于另一台显示器，已跳过以避免误应用。");
+            }
+            else if (_displayColorProfileService?.IsSupported != true)
+            {
+                issues.Add("当前平台不支持 RGB ICC 校准。");
+            }
+            else if (!_supportsVcgtAdjustment || !_calibrationLoaderEnabled)
+            {
+                issues.Add("当前显示器或 Windows 校准加载器不支持 VCGT，已跳过 RGB 校准。");
+            }
+            else
+            {
+                try
+                {
+                    var displayName = GetSelectedDisplayName(monitor)
+                        ?? throw new InvalidOperationException("无法确定显示器名称。");
+                    var hdrState = _displaySettingsBackend is null
+                        ? null
+                        : await _displaySettingsBackend.GetHdrStateAsync(monitor.Id);
+                    if (hdrState?.IsEnabled == true)
+                    {
+                        DiagnosticLog.Write("WARN", "profile.rgb.apply.skipped", $"profile={profile.Name}; display={displayName}; reason=hdr-enabled");
+                        issues.Add("当前 HDR 已开启，已跳过 SDR RGB 校准。");
+                    }
+                    else
+                    {
+                        DiagnosticLog.Write("INFO", "profile.rgb.apply.started", $"profile={profile.Name}; display={displayName}; red={rgb.RedPercent}; green={rgb.GreenPercent}; blue={rgb.BluePercent}; automation={skipInputSource}");
+                        var activeProfilePath = await _displayColorProfileService.ApplyRgbAdjustmentAsync(displayName, rgb);
+                        _appliedRedRgbGainPercent = rgb.RedPercent;
+                        _appliedGreenRgbGainPercent = rgb.GreenPercent;
+                        _appliedBlueRgbGainPercent = rgb.BluePercent;
+                        _hasKnownAppliedRgbGains = true;
+                        RedRgbGainPercent = rgb.RedPercent;
+                        GreenRgbGainPercent = rgb.GreenPercent;
+                        BlueRgbGainPercent = rgb.BluePercent;
+                        OnPropertyChanged(nameof(IsRgbAdjustmentPending));
+                        OnPropertyChanged(nameof(RgbGainPendingStatus));
+                        RgbGainStatus = $"已通过预设应用 RGB 校准：R {rgb.RedPercent}% / G {rgb.GreenPercent}% / B {rgb.BluePercent}%。";
+                        DiagnosticLog.Write("INFO", "profile.rgb.apply.completed", $"profile={profile.Name}; display={displayName}; activeProfile={activeProfilePath}; red={rgb.RedPercent}; green={rgb.GreenPercent}; blue={rgb.BluePercent}; automation={skipInputSource}");
+                        applied++;
+                    }
+                }
+                catch (Exception exception)
+                {
+                    DiagnosticLog.Write("ERROR", "profile.rgb.apply.failed", $"profile={profile.Name}; monitor={monitor.Id.Value}; automation={skipInputSource}; error={exception}");
+                    issues.Add($"RGB 校准：{exception.Message}");
+                }
+            }
         }
         var summary = issues.Count == 0
             ? $"已应用预设“{profile.Name}”，共 {applied} 项。"
@@ -222,19 +346,33 @@ public sealed partial class ControlViewModel : ObservableObject
             if (!IsAutomationEnabled) return;
             var rule = AutomationRules.FirstOrDefault(candidate => candidate.IsEnabled &&
                 string.Equals(candidate.ExecutablePath, eventArgs.ExecutablePath, StringComparison.OrdinalIgnoreCase));
-            if (SelectedMonitor is not { } monitor) return;
+            if (SelectedMonitor is not { } monitor)
+            {
+                DiagnosticLog.Write("WARN", "automation.foreground.ignored", $"executable={eventArgs.ExecutablePath}; reason=no-selected-monitor");
+                return;
+            }
             var profileName = rule?.ProfileName ?? DefaultAutomationProfile?.Name;
-            if (profileName is null) return;
+            if (profileName is null)
+            {
+                DiagnosticLog.Write("INFO", "automation.foreground.ignored", $"executable={eventArgs.ExecutablePath}; matchedRule={rule is not null}; reason=no-fallback-profile");
+                return;
+            }
             var profile = Profiles.FirstOrDefault(candidate => string.Equals(candidate.Name, profileName, StringComparison.OrdinalIgnoreCase));
             if (profile is null)
             {
                 AutomationStatus = $"自动化预设“{profileName}”不存在。";
+                DiagnosticLog.Write("ERROR", "automation.foreground.profile-missing", $"executable={eventArgs.ExecutablePath}; matchedRule={rule is not null}; profile={profileName}");
                 return;
             }
             // Unmatched apps share the same fallback rule; changing between them must not reapply it.
             var ruleIdentity = rule?.ExecutablePath ?? $"default:{profile.Name}";
             var key = $"{ruleIdentity}|{profile.Name}|{monitor.Id.Value}";
-            if (string.Equals(_lastAutomationKey, key, StringComparison.OrdinalIgnoreCase)) return;
+            DiagnosticLog.Write("INFO", "automation.foreground.profile-selected", $"executable={eventArgs.ExecutablePath}; matchedRule={rule is not null}; source={(rule is null ? "default" : "application-rule")}; profile={profile.Name}; monitor={monitor.Id.Value}; rgb={profile.RgbGainAdjustment}; colorProfile={profile.ColorProfilePath}");
+            if (string.Equals(_lastAutomationKey, key, StringComparison.OrdinalIgnoreCase))
+            {
+                DiagnosticLog.Write("INFO", "automation.foreground.apply-skipped", $"executable={eventArgs.ExecutablePath}; source={(rule is null ? "default" : "application-rule")}; profile={profile.Name}; reason=selection-unchanged");
+                return;
+            }
             AutomationStatus = $"检测到 {Path.GetFileName(eventArgs.ExecutablePath)}，正在应用“{profile.Name}”…";
             try
             {
@@ -245,6 +383,8 @@ public sealed partial class ControlViewModel : ObservableObject
                     AutomationStatus.StartsWith("预设部分应用：成功", StringComparison.Ordinal) &&
                     AutomationStatus.EndsWith("失败 0 项。", StringComparison.Ordinal))
                     _lastAutomationKey = key;
+                DiagnosticLog.Write(AutomationStatus.EndsWith("失败 0 项。", StringComparison.Ordinal) || AutomationStatus.StartsWith("已应用预设", StringComparison.Ordinal) ? "INFO" : "WARN",
+                    "automation.foreground.apply.completed", $"executable={eventArgs.ExecutablePath}; source={(rule is null ? "default" : "application-rule")}; profile={profile.Name}; result={AutomationStatus}");
             }
             catch (Exception exception)
             {

@@ -59,10 +59,12 @@ internal static class DiagnosticLog
             var line = $"{DateTimeOffset.UtcNow:O} level={level} event={eventName} {safeDetails}".TrimEnd();
             lock (Sync)
             {
-                File.AppendAllText(LogPath, line + Environment.NewLine);
+                // The listener already holds the log file open. Reopening that file with
+                // File.AppendAllText can fail Windows' bidirectional share-mode checks;
+                // the old broad catch then silently discarded every structured event.
+                _listener?.WriteLine(line);
+                _listener?.Flush();
             }
-
-            Trace.WriteLine(line);
         }
         catch
         {

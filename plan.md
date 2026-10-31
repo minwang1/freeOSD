@@ -117,11 +117,11 @@ python/                         # 不属于活动项目；用户计划后续删�
   1. 定义 RGB 调整参数模型、默认中性值、范围/步进、输入校验和重置行为；UI 区分待应用值与当前已应用状态。
   2. 从首次应用前保存的原始显示器 profile 派生新的 profile 文件，保留原文件及原始 metadata，不直接覆盖源 ICC；写入每通道 VCGT 曲线和应用参数摘要并校验 ICC/tag table 边界。公式型 VCGT 和已有 MHC2 profile 暂不作为基底。
   3. 将生成的 profile 安装并关联为默认项；沿用现有备份，应用失败立即回滚并读回确认。中性值使用 identity VCGT 曲线。
-  4. 加入取消/重置、重复应用、切换显示器和恢复原 profile 的状态处理；为应用生成文件做有界清理，不删除用户导入 profile。
+  4. 加入取消/重置、重复应用、切换显示器和恢复原 profile 的状态处理；只允许逐项删除符合本应用标识的非活动 RGB profile，不删除用户导入 profile。
   5. 由用户在实际显示器上验证单通道及组合调整、恢复、HDR 开关影响，并用日志确认配置文件路径和关联读回；未验证的 GPU/驱动组合明确标为未支持/未验证。
-- RGB 流程稳定后再做：亮度/白点高级校准、配置保存与预设联动、基于可信测量元数据的 MHC2/HDR 实机兼容验证、多显示器独立 profile 生命周期。任何扩展都不得修改用户原 ICC 或跳过原 profile 恢复。
+- RGB 流程稳定后再做：亮度/白点高级校准、基于可信测量元数据的 MHC2/HDR 实机兼容验证、多显示器独立 profile 生命周期。预设/自动化联动已实现但仍需实机验证。任何扩展都不得修改用户原 ICC 或跳过原 profile 恢复。
 - 验收：Windows build 20348+；HDR 关闭且系统 VCGT 能力/校准加载器可用时，RGB 每通道及组合调整能生成独立 VCGT profile、应用并恢复原 profile，日志能确认目标设备和活动 profile；用户已确认颜色可见变化。HDR 下不应用 VCGT。RGB 可见效果在当前 Windows 显示器上已验证；MHC2/HDR 和多显示器效果仍未验证。
-- 下一工作包：清理旧的 MonitorControl 生成 profile，保留当前应用项和原始 profile；然后把 RGB 参数纳入保存预设及自动化规则，并验证重启/切换显示器后的恢复行为。
+- RGB 参数及当前活动 ICC profile 已纳入保存预设和默认预设自动化路径；前台自动化日志记录规则命中或回退来源，并跳过输入源时不再将其误记为失败；滑块停止后尝试临时 Gamma Ramp 预览，点击应用后才生成带用户确认文件名的 profile；设置页提供单个生成 profile 删除，保护活动项/原始备份。仍需在用户环境验证 ICC/RGB 自动化、临时预览、删除、重启恢复和显示器切换行为。
 - 技术评估见 [`docs/windows-gpu-color-correction-spike.md`](docs/windows-gpu-color-correction-spike.md)。
 
 ### P4：OSD/VCP 识别、报告和高级诊断
@@ -251,7 +251,8 @@ P6 发布、性能与旧实现退役
 | P2 登录启动 | 已实现，待增量构建验证 | Windows 设置页通过当前用户 Run 项启用/关闭，无需管理员权限；Linux 明确显示不支持。 |
 | P3 Windows HDR | 已实现，用户已验证切换生效 | 通过活动 DisplayConfig 路径和 HDR 专用状态接口查询/切换，写入后读回并记录诊断日志；旧版 Advanced Color/WCG 状态不再冒充 HDR。 |
 | P3 Windows 应用自动切换 | 已实现首版，待 Windows 实机验证 | 已安装程序搜索选择、添加规则时使用上一个前台程序、逐程序规则、未命中默认预设、预设删除联动和版本化用户存储；自动切换开关状态跨启动恢复。自动应用逐项验证并跳过输入源 VCP 0x60；Linux 不支持。 |
-| P3.5 Windows ICC/GPU 色彩 | RGB SDR VCGT 控件、独立 profile 生成、应用/读回/失败恢复已实现；单显示器 RGB 可见效果已由用户确认 | HDR/MHC2、多显示器及预设/自动化联动仍待验证；多次调整留下的生成 profile 需要清理。 |
+| P3.5 Windows ICC/GPU 色彩 | RGB SDR VCGT 控件、临时 Gamma Ramp 预览、确认文件名后生成独立 profile、应用/读回/失败恢复及逐项删除入口已实现；单显示器 RGB 可见效果已由用户确认 | Gamma Ramp 预览受驱动限制；HDR/MHC2、多显示器、删除行为及预设/自动化联动仍待实机验证。 |
+| RGB 预设与自动化联动 | 已实现代码路径，待增量构建和 Windows 实机验证 | 预设可存已应用 RGB 参数；手动和自动应用共用流程；按显示器身份与 VCGT/HDR 能力限制应用。旧 JSON 预设缺少该可选字段时兼容为无 RGB。 |
 | 根目录 Git 忽略规则 | 已完成 | 已忽略 .NET `bin/obj`、IDE 文件及 Python 缓存/打包产物。 |
 | Windows/Linux 后端 | 未开始 | 需契约冻结和后续分派。 |
 | .NET 构建 | 已通过 | `dotnet build .\MonitorControl.sln --no-restore -m:1 -v:minimal`，临时设置 `AVALONIA_TELEMETRY_OPTOUT=1`；0 警告、0 错误。 |

@@ -9,6 +9,17 @@
         x:DataType="vm:ControlViewModel"
         Title="Monitor Control"
         Width="1100" Height="720" MinWidth="900" MinHeight="600">
+    <Window.Styles>
+        <Style Selector="Button.nav-item">
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+        </Style>
+        <Style Selector="Button.nav-item.nav-selected">
+            <Setter Property="Background" Value="#EAF0FF" />
+            <Setter Property="Foreground" Value="#304A7A" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+    </Window.Styles>
     <Grid RowDefinitions="Auto,*,Auto" Background="#F4F6FA">
         <Border Grid.Row="0" Background="White" Padding="20,14" BorderBrush="#DDE3EC" BorderThickness="0,0,0,1"
                 IsEnabled="{Binding IsUiInteractionEnabled}">
@@ -32,12 +43,14 @@
         <Grid Grid.Row="1" ColumnDefinitions="210,*" IsEnabled="{Binding IsUiInteractionEnabled}">
             <Border Grid.Column="0" Background="White" BorderBrush="#DDE3EC" BorderThickness="0,0,1,0" Padding="12">
                 <StackPanel Spacing="6">
-                    <Button Content="◉  控制" HorizontalContentAlignment="Left" Classes="nav-selected"
+                    <Button Content="◉  控制" Classes="nav-item" Classes.nav-selected="{Binding IsControlTab}"
                             Click="OnControlTabClick" />
-                    <Button Content="▣  预设与自动化" HorizontalContentAlignment="Left"
+                    <Button Content="◈  色彩管理" Classes="nav-item" Classes.nav-selected="{Binding IsColorManagementTab}"
+                            Click="OnColorManagementTabClick" />
+                    <Button Content="▣  预设与自动化" Classes="nav-item" Classes.nav-selected="{Binding IsProfilesTab}"
                             Click="OnProfilesTabClick" />
-                    <Button Content="◈  识别与诊断" HorizontalContentAlignment="Left" IsEnabled="False" />
-                    <Button Content="⚙  设置" HorizontalContentAlignment="Left" Click="OnSettingsTabClick" />
+                    <Button Content="⚙  设置" Classes="nav-item" Classes.nav-selected="{Binding IsSettingsTab}"
+                            Click="OnSettingsTabClick" />
                 </StackPanel>
             </Border>
 
@@ -67,7 +80,7 @@
                     <Border IsVisible="{Binding HasMonitors}" Background="White" BorderBrush="#DDE3EC" BorderThickness="1" CornerRadius="10" Padding="22">
                         <StackPanel Spacing="16">
                             <TextBlock Text="画面与色彩" FontSize="18" FontWeight="SemiBold" />
-                            <ItemsControl ItemsSource="{Binding ContinuousControls}">
+                            <ItemsControl ItemsSource="{Binding ControlPanelContinuousControls}">
                                 <ItemsControl.ItemTemplate>
                                 <DataTemplate x:DataType="vm:VcpControlViewModel">
                                         <Grid ColumnDefinitions="150,*,64" RowDefinitions="Auto,Auto" Margin="0,5">
@@ -84,7 +97,7 @@
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
-                            <TextBlock Text="当前显示器未声明可调节的亮度、对比度或 RGB 增益控件。"
+                            <TextBlock Text="当前显示器未声明可调节的亮度或对比度控件。"
                                        Foreground="#687386" IsVisible="{Binding HasNoContinuousControls}" />
 
                             <ItemsControl ItemsSource="{Binding DiscreteControls}">
@@ -188,7 +201,7 @@
                     <Border IsVisible="{Binding HasMonitors}" Background="White" BorderBrush="#DDE3EC" BorderThickness="1" CornerRadius="10" Padding="22">
                         <StackPanel Spacing="12">
                             <TextBlock Text="显示器预设" FontSize="18" FontWeight="SemiBold" />
-                            <TextBlock Text="保存当前已确认的显示器控件值。应用时会逐项写入并验证。" Foreground="#687386" TextWrapping="Wrap" />
+                            <TextBlock Text="保存当前已确认的 VCP 控件值和已应用的 RGB 校准参数。应用时会逐项写入并验证；自动切换也会应用匹配预设中的 RGB 校准。" Foreground="#687386" TextWrapping="Wrap" />
                             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                                 <TextBox PlaceholderText="预设名称" Text="{Binding ProfileName, Mode=TwoWay}" />
                                 <Button Grid.Column="1" Content="保存当前设置" Command="{Binding SaveProfileCommand}" />
@@ -250,13 +263,13 @@
                     </Border>
                 </StackPanel>
             </ScrollViewer>
-            <ScrollViewer Grid.Column="1" Padding="28" IsVisible="{Binding IsSettingsTab}">
+            <ScrollViewer Grid.Column="1" Padding="28" IsVisible="{Binding IsColorManagementTab}">
                 <StackPanel Spacing="18" MaxWidth="900" HorizontalAlignment="Left">
-                    <TextBlock Text="设置" FontSize="26" FontWeight="SemiBold" />
+                    <TextBlock Text="色彩管理" FontSize="26" FontWeight="SemiBold" />
                     <Border Background="White" BorderBrush="#DDE3EC" BorderThickness="1" CornerRadius="10" Padding="22">
                         <StackPanel Spacing="12">
                             <TextBlock Text="RGB 色彩调整（SDR）" FontSize="18" FontWeight="SemiBold" />
-                            <TextBlock Text="按通道生成 VCGT 校准曲线。100% 为中性，范围 50–150%。首次应用会保存原始 ICC，可随时恢复。HDR 模式暂不支持此校准方式。"
+                            <TextBlock Text="拖动停止后会临时预览颜色；点击应用时可命名并保存 SDR RGB ICC profile。100% 为中性，范围 50–150%。首次应用会保存原始 ICC，可随时恢复。HDR 模式暂不支持此校准方式。"
                                        Foreground="#687386" TextWrapping="Wrap" />
                             <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
                                 <TextBlock Text="{Binding RedRgbGainLabel}" VerticalAlignment="Center" Width="90" />
@@ -285,22 +298,13 @@
                     </Border>
                     <Border Background="White" BorderBrush="#DDE3EC" BorderThickness="1" CornerRadius="10" Padding="22">
                         <StackPanel Spacing="10">
-                            <TextBlock Text="启动与托盘" FontSize="18" FontWeight="SemiBold" />
-                            <CheckBox Content="登录 Windows 时启动 Monitor Control"
-                                      IsChecked="{Binding LoginStartupEnabled, Mode=TwoWay}"
-                                      IsEnabled="{Binding IsLoginStartupSupported}" />
-                            <TextBlock Text="{Binding LoginStartupStatus}" Foreground="#687386" TextWrapping="Wrap" />
-                        </StackPanel>
-                    </Border>
-                    <Border Background="White" BorderBrush="#DDE3EC" BorderThickness="1" CornerRadius="10" Padding="22">
-                        <StackPanel Spacing="10">
                             <TextBlock Text="Windows ICC 色彩配置文件" FontSize="18" FontWeight="SemiBold" />
                             <TextBlock Text="应用已关联到当前显示器的 ICC 配置文件。首次应用会保存当前配置，之后可恢复。" Foreground="#687386" TextWrapping="Wrap" />
                             <StackPanel Orientation="Horizontal" Spacing="10">
                                 <Button Content="导入 ICC/ICM 文件…" Command="{Binding ImportDisplayColorProfileCommand}" />
                                 <Button Content="刷新列表" Command="{Binding RefreshDisplayColorProfilesCommand}" />
                             </StackPanel>
-                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
                                 <ComboBox ItemsSource="{Binding DisplayColorProfiles}"
                                           SelectedItem="{Binding SelectedDisplayColorProfile, Mode=TwoWay}"
                                           IsEnabled="{Binding IsDisplayColorProfileSupported}">
@@ -310,7 +314,9 @@
                                         </DataTemplate>
                                     </ComboBox.ItemTemplate>
                                 </ComboBox>
-                                <TextBlock Grid.Column="1" Text="默认项" VerticalAlignment="Center" Foreground="#687386" />
+                                <Button Grid.Column="1" Content="删除" Command="{Binding DeleteGeneratedRgbProfileCommand}"
+                                        IsEnabled="{Binding CanDeleteSelectedGeneratedRgbProfile}" />
+                                <TextBlock Grid.Column="2" Text="默认项" VerticalAlignment="Center" Foreground="#687386" />
                             </Grid>
                             <StackPanel Orientation="Horizontal" Spacing="10">
                                 <Button Content="应用配置文件" Command="{Binding ApplyDisplayColorProfileCommand}" />
@@ -321,6 +327,20 @@
                             <TextBlock Text="{Binding DisplayColorProfileInspectionStatus}" Foreground="#43516A" TextWrapping="Wrap" />
                             <TextBlock Text="{Binding DisplayColorPipelineStatus}" Foreground="#43516A" TextWrapping="Wrap" />
                             <TextBlock Text="安装新 profile 需要管理员权限。随附的 test-srgb.icm 只用于检查导入和关联流程，不含校准曲线，不能作为可见色彩校正效果的测试文件。" FontSize="12" Foreground="#687386" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+            <ScrollViewer Grid.Column="1" Padding="28" IsVisible="{Binding IsSettingsTab}">
+                <StackPanel Spacing="18" MaxWidth="900" HorizontalAlignment="Left">
+                    <TextBlock Text="设置" FontSize="26" FontWeight="SemiBold" />
+                    <Border Background="White" BorderBrush="#DDE3EC" BorderThickness="1" CornerRadius="10" Padding="22">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="启动与托盘" FontSize="18" FontWeight="SemiBold" />
+                            <CheckBox Content="登录 Windows 时启动 Monitor Control"
+                                      IsChecked="{Binding LoginStartupEnabled, Mode=TwoWay}"
+                                      IsEnabled="{Binding IsLoginStartupSupported}" />
+                            <TextBlock Text="{Binding LoginStartupStatus}" Foreground="#687386" TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>
                 </StackPanel>

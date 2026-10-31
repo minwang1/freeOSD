@@ -24,7 +24,9 @@ public sealed record MonitorProfile(
     IReadOnlyDictionary<byte, uint> VcpValues,
     IReadOnlyDictionary<string, IdentifiedControlMetadata> IdentifiedControls,
     int? RefreshRateHz = null,
-    bool? HdrEnabled = null);
+    bool? HdrEnabled = null,
+    RgbGainAdjustment? RgbGainAdjustment = null,
+    string? ColorProfilePath = null);
 
 /// <summary>Capture-time omissions are diagnostics and are not persisted as profile data.</summary>
 public sealed record ProfileCaptureResult(

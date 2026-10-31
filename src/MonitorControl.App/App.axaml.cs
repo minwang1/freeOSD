@@ -19,6 +19,7 @@ namespace MonitorControl.App;
 
 public partial class App : Application
 {
+    private static App? _current;
     private RefreshRateTrialCoordinator? _refreshRateTrialCoordinator;
     private bool _allowShutdown;
     private int _shutdownResolutionRunning;
@@ -28,6 +29,7 @@ public partial class App : Application
 
     public override void Initialize()
     {
+        _current = this;
         DiagnosticLog.Initialize();
         AvaloniaXamlLoader.Load(this);
     }
@@ -49,7 +51,8 @@ public partial class App : Application
                     _refreshRateTrialCoordinator,
                     loginStartupService: new WindowsLoginStartupService(),
                     foregroundApplicationMonitor: new WindowsForegroundApplicationMonitor(),
-                    installedApplicationCatalog: new WindowsInstalledApplicationCatalog()));
+                    installedApplicationCatalog: new WindowsInstalledApplicationCatalog(),
+                    displayColorProfileService: new WindowsDisplayColorProfileService()));
             }
             else
             {
@@ -102,6 +105,14 @@ public partial class App : Application
         _mainWindow.Activate();
     }
 
+    public static void ActivatePrimaryWindow()
+    {
+        if (_current?._mainWindow is not { } window) return;
+        _current.ShowMainWindow();
+        if (OperatingSystem.IsWindows() && window.TryGetPlatformHandle() is { } handle)
+            WindowsTaskbarAttention.Flash(handle.Handle);
+    }
+
     private void ExitApplication()
     {
         if (_mainWindow is not null) _mainWindow.AllowClose = true;
@@ -110,14 +121,17 @@ public partial class App : Application
 
     private async void OnShutdownRequested(object? sender, ShutdownRequestedEventArgs eventArgs)
     {
-        if (_allowShutdown || _refreshRateTrialCoordinator is null)
+        if (_allowShutdown)
         {
             return;
         }
 
-        var activeTrials = _refreshRateTrialCoordinator.GetStates()
+        var activeTrials = _refreshRateTrialCoordinator?.GetStates()
             .Where(state => state.Status is not RefreshRateTrialStatus.Confirmed and not RefreshRateTrialStatus.Restored);
-        if (!activeTrials.Any())
+        var hasActiveTrials = activeTrials?.Any() == true;
+        var viewModel = _mainWindow?.DataContext as ControlViewModel;
+        var hasPendingPreview = viewModel?.HasPendingRgbPreview == true;
+        if (!hasActiveTrials && !hasPendingPreview)
         {
             return;
         }
@@ -131,9 +145,17 @@ public partial class App : Application
 
         try
         {
-            foreach (var trial in activeTrials)
+            if (hasPendingPreview && viewModel is not null && !await viewModel.RestoreRgbPreviewBeforeExitAsync())
             {
-                await _refreshRateTrialCoordinator.CancelAsync(trial.Trial.TrialId);
+                return;
+            }
+
+            if (_refreshRateTrialCoordinator is not null)
+            {
+                foreach (var trial in activeTrials ?? [])
+                {
+                    await _refreshRateTrialCoordinator.CancelAsync(trial.Trial.TrialId);
+                }
             }
 
             _allowShutdown = true;

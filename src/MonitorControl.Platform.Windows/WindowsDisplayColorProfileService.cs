@@ -21,6 +21,7 @@ public sealed class WindowsDisplayColorProfileService : IDisplayColorProfileServ
     private const int CapabilityVideoCardGammaTable = 1;
     private const int CapabilityMicrosoftHardwareColorV2 = 2;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly Dictionary<string, ushort[]> _rgbPreviewOriginalRamps = new(StringComparer.OrdinalIgnoreCase);
     private readonly string _backupPath;
 
     public WindowsDisplayColorProfileService(string? backupPath = null) => _backupPath = backupPath ?? Path.Combine(
@@ -144,7 +145,120 @@ public sealed class WindowsDisplayColorProfileService : IDisplayColorProfileServ
         return installedPath;
     }
 
-    public async Task<string> ApplyRgbAdjustmentAsync(string displayName, RgbGainAdjustment gains, CancellationToken cancellationToken = default)
+    public async Task<string> GetDefaultRgbProfileFileNameAsync(string displayName, RgbGainAdjustment gains, CancellationToken cancellationToken = default)
+    {
+        EnsureSupported();
+        gains.Validate();
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var target = GetTarget(displayName);
+            var scopeResult = Native.ColorProfileGetDisplayUserScope(target.AdapterId, target.SourceId, out var scope);
+            EnsureHResult(scopeResult, "Could not determine the active color-profile scope");
+            var activePath = GetActivePath(target, scope)
+                ?? throw new InvalidOperationException("The display has no active ICC profile to use as an RGB-adjustment base.");
+            var backups = await LoadBackupsAsync(cancellationToken).ConfigureAwait(false);
+            var sourcePath = backups.TryGetValue(displayName, out var backup) ? backup.OriginalProfilePath : activePath;
+            if (!File.Exists(sourcePath)) throw new FileNotFoundException("The original ICC profile used as the RGB-adjustment base is unavailable.", sourcePath);
+            var contentHash = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(sourcePath, cancellationToken).ConfigureAwait(false))).ToLowerInvariant();
+            return $"MonitorControl-RGB-{contentHash[..16]}-{gains.RedPercent}-{gains.GreenPercent}-{gains.BluePercent}.icm";
+        }
+        finally { _gate.Release(); }
+    }
+
+    public Task PreviewRgbAdjustmentAsync(string displayName, RgbGainAdjustment gains, CancellationToken cancellationToken = default) =>
+        Task.Run(() =>
+        {
+            EnsureSupported();
+            gains.Validate();
+            _gate.Wait(cancellationToken);
+            try
+            {
+                if (gains == RgbGainAdjustment.Neutral)
+                {
+                    RestoreRgbPreviewCore(displayName);
+                    return;
+                }
+
+                var displayDc = Native.CreateDisplayDc("DISPLAY", displayName, null, IntPtr.Zero);
+                if (displayDc == IntPtr.Zero)
+                    throw new InvalidOperationException($"Windows could not open display '{displayName}' for temporary gamma preview (Win32 error {Marshal.GetLastWin32Error()}).");
+                try
+                {
+                    if (!_rgbPreviewOriginalRamps.TryGetValue(displayName, out var originalRamp))
+                    {
+                        originalRamp = new ushort[3 * 256];
+                        if (!Native.GetDeviceGammaRamp(displayDc, originalRamp))
+                            throw new PlatformNotSupportedException("The display driver does not expose a readable gamma ramp; temporary RGB preview is unavailable.");
+                        _rgbPreviewOriginalRamps[displayName] = originalRamp;
+                    }
+
+                    var previewRamp = new ushort[3 * 256];
+                    var gainPercent = new[] { gains.RedPercent, gains.GreenPercent, gains.BluePercent };
+                    for (var channel = 0; channel < 3; channel++)
+                    {
+                        for (var sample = 0; sample < 256; sample++)
+                        {
+                            var index = channel * 256 + sample;
+                            previewRamp[index] = checked((ushort)Math.Clamp(
+                                Math.Round(originalRamp[index] * gainPercent[channel] / 100.0, MidpointRounding.AwayFromZero),
+                                0,
+                                ushort.MaxValue));
+                        }
+                    }
+
+                    if (!Native.SetDeviceGammaRamp(displayDc, previewRamp))
+                    {
+                        RestoreRgbPreviewCore(displayName, displayDc);
+                        throw new PlatformNotSupportedException($"The display driver rejected temporary gamma preview (Win32 error {Marshal.GetLastWin32Error()}).");
+                    }
+                    var actualRamp = new ushort[3 * 256];
+                    if (!Native.GetDeviceGammaRamp(displayDc, actualRamp) || !actualRamp.SequenceEqual(previewRamp))
+                    {
+                        RestoreRgbPreviewCore(displayName, displayDc);
+                        throw new InvalidOperationException("Windows reported the gamma preview request, but readback did not match. The driver may have silently ignored it.");
+                    }
+                    Trace.TraceInformation($"display.icc.rgb.preview.applied display={displayName} red={gains.RedPercent} green={gains.GreenPercent} blue={gains.BluePercent} readback=true");
+                }
+                finally { Native.DeleteDeviceDc(displayDc); }
+            }
+            finally { _gate.Release(); }
+        }, cancellationToken);
+
+    public Task RestoreRgbPreviewAsync(string displayName, CancellationToken cancellationToken = default) =>
+        Task.Run(() =>
+        {
+            EnsureSupported();
+            _gate.Wait(cancellationToken);
+            try { RestoreRgbPreviewCore(displayName); }
+            finally { _gate.Release(); }
+        }, cancellationToken);
+
+    private void RestoreRgbPreviewCore(string displayName, IntPtr existingDisplayDc = default)
+    {
+        if (!_rgbPreviewOriginalRamps.TryGetValue(displayName, out var originalRamp)) return;
+        var displayDc = existingDisplayDc;
+        var ownsDisplayDc = displayDc == IntPtr.Zero;
+        if (ownsDisplayDc) displayDc = Native.CreateDisplayDc("DISPLAY", displayName, null, IntPtr.Zero);
+        if (displayDc == IntPtr.Zero)
+            throw new InvalidOperationException($"Windows could not open display '{displayName}' to restore its original gamma ramp.");
+        try
+        {
+            if (!Native.SetDeviceGammaRamp(displayDc, originalRamp))
+                throw new InvalidOperationException($"Windows could not restore the original gamma ramp for '{displayName}' (Win32 error {Marshal.GetLastWin32Error()}).");
+            var actualRamp = new ushort[3 * 256];
+            if (!Native.GetDeviceGammaRamp(displayDc, actualRamp) || !actualRamp.SequenceEqual(originalRamp))
+                throw new InvalidOperationException($"Gamma ramp restoration for '{displayName}' could not be verified.");
+            _rgbPreviewOriginalRamps.Remove(displayName);
+            Trace.TraceInformation($"display.icc.rgb.preview.restored display={displayName} readback=true");
+        }
+        finally
+        {
+            if (ownsDisplayDc) Native.DeleteDeviceDc(displayDc);
+        }
+    }
+
+    public async Task<string> ApplyRgbAdjustmentAsync(string displayName, RgbGainAdjustment gains, string? profileFileName = null, CancellationToken cancellationToken = default)
     {
         EnsureSupported();
         gains.Validate();
@@ -165,12 +279,19 @@ public sealed class WindowsDisplayColorProfileService : IDisplayColorProfileServ
                 throw new FileNotFoundException("The original ICC profile used as the RGB-adjustment base is no longer available.", sourceProfilePath);
 
             var contentHash = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(sourceProfilePath, cancellationToken).ConfigureAwait(false))).ToLowerInvariant();
-            var generatedName = $"MonitorControl-RGB-{contentHash[..16]}-{gains.RedPercent}-{gains.GreenPercent}-{gains.BluePercent}.icm";
+            var generatedName = NormalizeGeneratedRgbProfileFileName(profileFileName ?? $"MonitorControl-RGB-{contentHash[..16]}-{gains.RedPercent}-{gains.GreenPercent}-{gains.BluePercent}.icm");
             var generatedDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MonitorControl", "GeneratedProfiles");
             var generatedPath = Path.Combine(generatedDirectory, generatedName);
             IccRgbGainProfileWriter.Create(sourceProfilePath, generatedPath, gains);
             var installedPath = Path.Combine(GetColorDirectory(), generatedName);
-            if (!File.Exists(installedPath) && !Native.InstallColorProfile(IntPtr.Zero, generatedPath))
+            if (File.Exists(installedPath))
+            {
+                var generatedHash = SHA256.HashData(await File.ReadAllBytesAsync(generatedPath, cancellationToken).ConfigureAwait(false));
+                var installedHash = SHA256.HashData(await File.ReadAllBytesAsync(installedPath, cancellationToken).ConfigureAwait(false));
+                if (!CryptographicOperations.FixedTimeEquals(generatedHash, installedHash))
+                    throw new IOException($"A different color profile already uses the file name '{generatedName}'. Choose another name.");
+            }
+            else if (!Native.InstallColorProfile(IntPtr.Zero, generatedPath))
             {
                 var error = Marshal.GetLastWin32Error();
                 if (error == 5) throw new UnauthorizedAccessException("Installing the generated RGB profile requires administrator permission.");
@@ -252,19 +373,53 @@ public sealed class WindowsDisplayColorProfileService : IDisplayColorProfileServ
             if (!available.Any(profile => PathsEqual(profile.Path, profilePath)))
                 throw new InvalidOperationException("The selected profile is not associated with this display.");
 
+            var previousActivePath = GetActivePath(target, scope)
+                ?? throw new InvalidOperationException("Windows did not return the current display profile; refusing to apply without a recoverable previous profile.");
+
             var backups = await LoadBackupsAsync(cancellationToken).ConfigureAwait(false);
-            if (!backups.ContainsKey(displayName))
+            var hadBackup = backups.ContainsKey(displayName);
+            if (!hadBackup)
             {
-                var current = GetActivePath(target, scope) ?? throw new InvalidOperationException("Windows did not return the current display profile; refusing to apply without a recoverable original.");
-                backups[displayName] = new Backup(scope, current, available.Select(profile => profile.Path).ToArray());
+                backups[displayName] = new Backup(scope, previousActivePath, available.Select(profile => profile.Path).ToArray());
                 await SaveBackupsAsync(backups, cancellationToken).ConfigureAwait(false);
             }
 
-            result = Native.ColorProfileAddDisplayAssociation(scope, profilePath, target.AdapterId, target.SourceId, true, false);
-            EnsureHResult(result, "Windows could not apply the selected display profile");
-            var actual = GetActivePath(target, scope);
-            if (!PathsEqual(actual, profilePath))
-                throw new InvalidOperationException($"Windows returned a different active profile after applying. Expected '{profilePath}', actual '{actual}'.");
+            var defaultChangeAttempted = false;
+            try
+            {
+                Trace.TraceInformation($"display.icc.apply.default.started display={displayName} scope={scope} profile={profilePath} previous={previousActivePath}");
+                defaultChangeAttempted = true;
+                result = Native.ColorProfileSetDisplayDefaultAssociation(scope, profilePath, ProfileTypeIcc, ProfileSubtypeNone, target.AdapterId, target.SourceId);
+                Trace.TraceInformation($"display.icc.apply.default.returned display={displayName} hresult=0x{result:X8} profile={profilePath}");
+                EnsureHResult(result, "Windows could not set the selected display profile as the default");
+                var actual = GetActivePath(target, scope);
+                if (!PathsEqual(actual, profilePath))
+                    throw new InvalidOperationException($"Windows returned a different active profile after applying. Expected '{profilePath}', actual '{actual}'.");
+                Trace.TraceInformation($"display.icc.apply.completed display={displayName} active={actual}");
+            }
+            catch (Exception applyException)
+            {
+                if (!defaultChangeAttempted) throw;
+                try
+                {
+                    var rollbackResult = Native.ColorProfileSetDisplayDefaultAssociation(scope, previousActivePath, ProfileTypeIcc, ProfileSubtypeNone, target.AdapterId, target.SourceId);
+                    EnsureHResult(rollbackResult, "Windows could not restore the previous default profile after apply failed");
+                    var restored = GetActivePath(target, scope);
+                    if (!PathsEqual(restored, previousActivePath))
+                        throw new InvalidOperationException($"Profile apply failed and rollback readback did not match. Expected '{previousActivePath}', actual '{restored}'.");
+                    if (!hadBackup)
+                    {
+                        backups.Remove(displayName);
+                        await SaveBackupsAsync(backups, cancellationToken).ConfigureAwait(false);
+                    }
+                    Trace.TraceWarning($"display.icc.apply.rolled_back display={displayName} previous={previousActivePath} error={applyException.Message}");
+                    throw;
+                }
+                catch (Exception rollbackException) when (!ReferenceEquals(rollbackException, applyException))
+                {
+                    throw new AggregateException("Applying the selected profile failed and restoring the previous profile also failed. Use Restore Original Profile to recover.", applyException, rollbackException);
+                }
+            }
         }
         finally { _gate.Release(); }
     }
@@ -278,8 +433,14 @@ public sealed class WindowsDisplayColorProfileService : IDisplayColorProfileServ
             var backups = await LoadBackupsAsync(cancellationToken).ConfigureAwait(false);
             if (!backups.TryGetValue(displayName, out var backup)) throw new InvalidOperationException("There is no saved original profile for this display.");
             var target = GetTarget(displayName);
-            var result = Native.ColorProfileAddDisplayAssociation(backup.Scope, backup.OriginalProfilePath, target.AdapterId, target.SourceId, true, false);
-            EnsureHResult(result, "Windows could not restore the original display profile");
+            var associatedProfiles = GetProfilesAsync(displayName, cancellationToken).GetAwaiter().GetResult();
+            if (!associatedProfiles.Any(profile => PathsEqual(profile.Path, backup.OriginalProfilePath)))
+            {
+                var associateResult = Native.ColorProfileAddDisplayAssociation(backup.Scope, backup.OriginalProfilePath, target.AdapterId, target.SourceId, false, false);
+                EnsureHResult(associateResult, "Windows could not associate the original display profile for restoration");
+            }
+            var result = Native.ColorProfileSetDisplayDefaultAssociation(backup.Scope, backup.OriginalProfilePath, ProfileTypeIcc, ProfileSubtypeNone, target.AdapterId, target.SourceId);
+            EnsureHResult(result, "Windows could not set the original display profile as the default");
             foreach (var profile in GetProfilesAsync(displayName, cancellationToken).GetAwaiter().GetResult())
             {
                 if (!backup.OriginalAssociatedProfiles.Any(path => PathsEqual(path, profile.Path)))
@@ -298,6 +459,74 @@ public sealed class WindowsDisplayColorProfileService : IDisplayColorProfileServ
     {
         var backups = await LoadBackupsAsync(cancellationToken).ConfigureAwait(false);
         return backups.ContainsKey(displayName);
+    }
+
+    public async Task DeleteGeneratedRgbProfileAsync(string displayName, string profilePath, CancellationToken cancellationToken = default)
+    {
+        EnsureSupported();
+        ArgumentException.ThrowIfNullOrWhiteSpace(profilePath);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var fullPath = Path.GetFullPath(profilePath);
+            var colorDirectory = Path.GetFullPath(GetColorDirectory());
+            if (!PathsEqual(Path.GetDirectoryName(fullPath), colorDirectory) ||
+                !Path.GetFileName(fullPath).StartsWith("MonitorControl-RGB-", StringComparison.OrdinalIgnoreCase) ||
+                !File.Exists(fullPath))
+                throw new InvalidOperationException("Only an installed Monitor Control RGB profile can be deleted here.");
+
+            var inspection = IccProfileInspector.Inspect(fullPath);
+            var gains = inspection.RgbGainAdjustment
+                ?? throw new InvalidOperationException("The selected file does not contain Monitor Control RGB metadata.");
+            gains.Validate();
+
+            var targets = GetActiveTargets();
+            if (!targets.Any(target => string.Equals(target.DisplayName, displayName, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException($"Could not find active display '{displayName}'.");
+            if (!(await GetProfilesAsync(displayName, cancellationToken).ConfigureAwait(false)).Any(profile => PathsEqual(profile.Path, fullPath)))
+                throw new InvalidOperationException("The selected profile is not associated with this display.");
+            var backups = await LoadBackupsAsync(cancellationToken).ConfigureAwait(false);
+            var protectedPaths = backups.Values
+                .SelectMany(backup => new[] { backup.OriginalProfilePath }.Concat(backup.OriginalAssociatedProfiles))
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (protectedPaths.Contains(fullPath))
+                throw new InvalidOperationException("This profile is saved as an original or original-associated profile and cannot be deleted.");
+
+            foreach (var target in targets)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var display = new TargetDisplay(target.AdapterId, target.SourceId);
+                var scopeResult = Native.ColorProfileGetDisplayUserScope(display.AdapterId, display.SourceId, out var scope);
+                EnsureHResult(scopeResult, "Could not determine an active display's profile scope");
+                if (PathsEqual(GetActivePath(display, scope), fullPath))
+                    throw new InvalidOperationException("The selected profile is currently active on a display and cannot be deleted.");
+            }
+
+            foreach (var target in targets)
+            {
+                var display = new TargetDisplay(target.AdapterId, target.SourceId);
+                var scopeResult = Native.ColorProfileGetDisplayUserScope(display.AdapterId, display.SourceId, out var scope);
+                EnsureHResult(scopeResult, "Could not determine an active display's profile scope");
+                if (!GetAssociatedProfilePaths(display, scope).Any(path => PathsEqual(path, fullPath))) continue;
+                var result = Native.ColorProfileRemoveDisplayAssociation(scope, fullPath, display.AdapterId, display.SourceId, false);
+                EnsureHResult(result, "Windows could not remove the selected profile association");
+                if (GetAssociatedProfilePaths(display, scope).Any(path => PathsEqual(path, fullPath)))
+                    throw new InvalidOperationException("Windows still lists the profile as associated after removal.");
+            }
+
+            if (!Native.UninstallColorProfile(IntPtr.Zero, Path.GetFileName(fullPath), true))
+            {
+                var error = Marshal.GetLastWin32Error();
+                throw new InvalidOperationException($"Windows could not uninstall the selected profile (Win32 error {error}).");
+            }
+            if (File.Exists(fullPath)) throw new IOException("Windows reported the profile removed, but its file remains.");
+
+            var localCopy = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MonitorControl", "GeneratedProfiles", Path.GetFileName(fullPath));
+            if (File.Exists(localCopy)) File.Delete(localCopy);
+            Trace.TraceInformation($"display.icc.rgb.profile.deleted display={displayName} profile={fullPath} red={gains.RedPercent} green={gains.GreenPercent} blue={gains.BluePercent}");
+        }
+        finally { _gate.Release(); }
     }
 
     private static string? GetActivePath(TargetDisplay target, int scope)
@@ -350,7 +579,46 @@ public sealed class WindowsDisplayColorProfileService : IDisplayColorProfileServ
         throw new InvalidOperationException("Windows returned an unexpectedly large color-profile directory path.");
     }
 
+    private static string NormalizeGeneratedRgbProfileFileName(string fileName)
+    {
+        var normalized = fileName.Trim();
+        if (normalized.Length == 0 || Path.GetFileName(normalized) != normalized || normalized.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+            throw new ArgumentException("Enter a valid file name without a folder path.", nameof(fileName));
+        if (!normalized.StartsWith("MonitorControl-RGB-", StringComparison.OrdinalIgnoreCase))
+            normalized = "MonitorControl-RGB-" + normalized;
+        if (string.IsNullOrEmpty(Path.GetExtension(normalized))) normalized += ".icm";
+        var extension = Path.GetExtension(normalized);
+        if (!extension.Equals(".icm", StringComparison.OrdinalIgnoreCase) && !extension.Equals(".icc", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("RGB profile file names must use the .icm or .icc extension.", nameof(fileName));
+        return normalized;
+    }
+
     private static TargetDisplay GetTarget(string displayName)
+    {
+        var target = GetActiveTargets().FirstOrDefault(item => string.Equals(item.DisplayName, displayName, StringComparison.OrdinalIgnoreCase));
+        if (target is not null) return new TargetDisplay(target.AdapterId, target.SourceId);
+        throw new InvalidOperationException($"Could not find an active Windows display path for '{displayName}'.");
+    }
+
+    private static IReadOnlyList<string> GetAssociatedProfilePaths(TargetDisplay target, int scope)
+    {
+        var result = Native.ColorProfileGetDisplayList(scope, target.AdapterId, target.SourceId, out var names, out var count);
+        EnsureHResult(result, "Could not enumerate display color profiles during cleanup");
+        try
+        {
+            var paths = new List<string>((int)count);
+            for (var index = 0; index < count; index++)
+            {
+                var namePointer = Marshal.ReadIntPtr(names, index * IntPtr.Size);
+                var path = Marshal.PtrToStringUni(namePointer);
+                if (!string.IsNullOrWhiteSpace(path)) paths.Add(NormalizeInstalledProfilePath(path));
+            }
+            return paths;
+        }
+        finally { if (names != IntPtr.Zero) Native.LocalFree(names); }
+    }
+
+    private static IReadOnlyList<ActiveTargetDisplay> GetActiveTargets()
     {
         var result = Native.GetDisplayConfigBufferSizes(QdcOnlyActivePaths, out var pathCount, out var modeCount);
         if (result != 0) throw new InvalidOperationException($"GetDisplayConfigBufferSizes failed with Win32 error {result}.");
@@ -358,17 +626,18 @@ public sealed class WindowsDisplayColorProfileService : IDisplayColorProfileServ
         var modes = new Native.ModeInfo[modeCount];
         result = Native.QueryDisplayConfig(QdcOnlyActivePaths, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero, 0);
         if (result != 0) throw new InvalidOperationException($"QueryDisplayConfig failed with Win32 error {result}.");
-        foreach (var path in paths)
+        var targets = new List<ActiveTargetDisplay>();
+        foreach (var path in paths.Take(checked((int)pathCount)))
         {
             var request = new Native.SourceDeviceName
             {
                 Header = new Native.DeviceInfoHeader { Type = 1, Size = (uint)Marshal.SizeOf<Native.SourceDeviceName>(), AdapterId = path.Source.AdapterId, Id = path.Source.Id },
                 ViewGdiDeviceName = string.Empty
             };
-            if (Native.DisplayConfigGetDeviceInfo(ref request) == 0 && string.Equals(request.ViewGdiDeviceName, displayName, StringComparison.OrdinalIgnoreCase))
-                return new TargetDisplay(path.Target.AdapterId, path.Source.Id);
+            if (Native.DisplayConfigGetDeviceInfo(ref request) == 0)
+                targets.Add(new ActiveTargetDisplay(request.ViewGdiDeviceName, path.Target.AdapterId, path.Source.Id));
         }
-        throw new InvalidOperationException($"Could not find an active Windows display path for '{displayName}'.");
+        return targets;
     }
 
     private async Task<Dictionary<string, Backup>> LoadBackupsAsync(CancellationToken token)
@@ -404,6 +673,7 @@ public sealed class WindowsDisplayColorProfileService : IDisplayColorProfileServ
 
     private sealed record Backup(int Scope, string OriginalProfilePath, string[] OriginalAssociatedProfiles);
     private readonly record struct TargetDisplay(Native.Luid AdapterId, uint SourceId);
+    private sealed record ActiveTargetDisplay(string DisplayName, Native.Luid AdapterId, uint SourceId);
 
     private static class Native
     {
@@ -431,7 +701,12 @@ public sealed class WindowsDisplayColorProfileService : IDisplayColorProfileServ
         [DllImport("mscms.dll", CharSet = CharSet.Unicode)] internal static extern int ColorProfileSetDisplayDefaultAssociation(int scope, string profileName, int profileType, int profileSubtype, Luid adapterId, uint sourceId);
         [DllImport("mscms.dll", CharSet = CharSet.Unicode)] internal static extern int ColorProfileRemoveDisplayAssociation(int scope, string profileName, Luid adapterId, uint sourceId, [MarshalAs(UnmanagedType.Bool)] bool associateAsAdvancedColor);
         [DllImport("mscms.dll", EntryPoint = "InstallColorProfileW", CharSet = CharSet.Unicode, SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool InstallColorProfile(IntPtr machineName, string profileName);
+        [DllImport("mscms.dll", EntryPoint = "UninstallColorProfileW", CharSet = CharSet.Unicode, SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool UninstallColorProfile(IntPtr machineName, string profileName, [MarshalAs(UnmanagedType.Bool)] bool deleteProfile);
         [DllImport("mscms.dll", EntryPoint = "GetColorDirectoryW", CharSet = CharSet.Unicode, SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool GetColorDirectory(IntPtr machineName, System.Text.StringBuilder buffer, ref uint sizeBytes);
+        [DllImport("gdi32.dll", EntryPoint = "CreateDCW", CharSet = CharSet.Unicode, SetLastError = true)] internal static extern IntPtr CreateDisplayDc(string driver, string device, string? output, IntPtr initData);
+        [DllImport("gdi32.dll", EntryPoint = "DeleteDC", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool DeleteDeviceDc(IntPtr deviceContext);
+        [DllImport("gdi32.dll", EntryPoint = "GetDeviceGammaRamp", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool GetDeviceGammaRamp(IntPtr deviceContext, [Out] ushort[] ramp);
+        [DllImport("gdi32.dll", EntryPoint = "SetDeviceGammaRamp", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool SetDeviceGammaRamp(IntPtr deviceContext, ushort[] ramp);
         [DllImport("kernel32.dll")] internal static extern IntPtr LocalFree(IntPtr memory);
     }
 }

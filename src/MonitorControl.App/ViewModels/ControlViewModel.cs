@@ -43,6 +43,7 @@ public sealed partial class ControlViewModel : ObservableObject
     private string _profileStatus = "";
     private bool _isProfilesTab;
     private bool _isSettingsTab;
+    private bool _isColorManagementTab;
     private DisplayColorProfile? _selectedDisplayColorProfile;
     private string _displayColorProfileStatus = "选择显示器以读取关联的 ICC 配置文件。";
     private string _displayColorProfileInspectionStatus = "选择配置文件后，可查看 ICC 文件头和校准标签摘要。";
@@ -54,6 +55,8 @@ public sealed partial class ControlViewModel : ObservableObject
     private int _appliedGreenRgbGainPercent = 100;
     private int _appliedBlueRgbGainPercent = 100;
     private bool _hasKnownAppliedRgbGains;
+    private CancellationTokenSource? _rgbPreviewDebounce;
+    private string? _rgbPreviewDisplayName;
     private bool _supportsVcgtAdjustment;
     private bool _calibrationLoaderEnabled;
     private string _rgbGainStatus = "当前活动 profile 的 RGB 校准状态尚未读取。";
@@ -125,6 +128,7 @@ public sealed partial class ControlViewModel : ObservableObject
         ApplyDisplayColorProfileCommand = new AsyncCommand(ApplyDisplayColorProfileAsync, () => SelectedDisplayColorProfile is not null && SelectedMonitor is not null);
         RestoreDisplayColorProfileCommand = new AsyncCommand(RestoreDisplayColorProfileAsync, () => _hasOriginalDisplayColorProfile && SelectedMonitor is not null);
         ImportDisplayColorProfileCommand = new AsyncCommand(ImportDisplayColorProfileAsync, () => _displayColorProfileService?.IsSupported == true && SelectedMonitor is not null);
+        DeleteGeneratedRgbProfileCommand = new AsyncCommand(DeleteGeneratedRgbProfileAsync, () => CanDeleteSelectedGeneratedRgbProfile);
         ApplyRgbAdjustmentCommand = new AsyncCommand(ApplyRgbAdjustmentAsync, CanApplyRgbAdjustment);
         ResetRgbAdjustmentCommand = new AsyncCommand(() => { ResetRgbAdjustment(); return Task.CompletedTask; });
         if (_foregroundApplicationMonitor is not null)
@@ -147,7 +151,20 @@ public sealed partial class ControlViewModel : ObservableObject
     public ICommand RetryRefreshRateRestoreCommand { get; }
     public ICommand ToggleHdrCommand { get; }
     public bool IsHdrSupported { get => _hdrSupported; private set => SetField(ref _hdrSupported, value); }
-    public bool IsHdrEnabled { get => _hdrEnabled; private set { if (SetField(ref _hdrEnabled, value) && ApplyRgbAdjustmentCommand is AsyncCommand command) command.RaiseCanExecuteChanged(); } }
+    public bool IsHdrEnabled
+    {
+        get => _hdrEnabled;
+        private set
+        {
+            if (!SetField(ref _hdrEnabled, value)) return;
+            if (ApplyRgbAdjustmentCommand is AsyncCommand command) command.RaiseCanExecuteChanged();
+            if (value)
+            {
+                CancelRgbPreviewDebounce();
+                _ = RestorePendingRgbPreviewAsync();
+            }
+        }
+    }
     public string HdrStatus { get => _hdrStatus; private set => SetField(ref _hdrStatus, value); }
     public ObservableCollection<MonitorProfile> Profiles { get; } = [];
     public bool HasProfiles => Profiles.Count > 0;
@@ -166,6 +183,8 @@ public sealed partial class ControlViewModel : ObservableObject
         {
             if (!SetField(ref _selectedDisplayColorProfile, value)) return;
             if (ApplyDisplayColorProfileCommand is AsyncCommand command) command.RaiseCanExecuteChanged();
+            if (DeleteGeneratedRgbProfileCommand is AsyncCommand delete) delete.RaiseCanExecuteChanged();
+            OnPropertyChanged(nameof(CanDeleteSelectedGeneratedRgbProfile));
             _ = InspectSelectedDisplayColorProfileAsync(value);
         }
     }
@@ -190,6 +209,12 @@ public sealed partial class ControlViewModel : ObservableObject
     public ICommand ApplyDisplayColorProfileCommand { get; }
     public ICommand RestoreDisplayColorProfileCommand { get; }
     public ICommand ImportDisplayColorProfileCommand { get; }
+    public ICommand DeleteGeneratedRgbProfileCommand { get; }
+    public bool CanDeleteSelectedGeneratedRgbProfile => _displayColorProfileService?.IsSupported == true &&
+        SelectedMonitor is not null && SelectedDisplayColorProfile is { IsDefault: false } profile &&
+        Path.GetFileName(profile.Path).StartsWith("MonitorControl-RGB-", StringComparison.OrdinalIgnoreCase);
+    public Func<string, Task<string?>>? PromptRgbProfileFileNameAsync { get; set; }
+    public Func<string, Task<bool>>? ConfirmGeneratedRgbProfileDeletionAsync { get; set; }
     public Func<Task<string?>>? PickDisplayColorProfileFileAsync { get; set; }
     public bool IsAutomationSupported => _foregroundApplicationMonitor is not null;
     public IInstalledApplicationCatalog? InstalledApplicationCatalog => _installedApplicationCatalog;
@@ -226,21 +251,49 @@ public sealed partial class ControlViewModel : ObservableObject
         set
         {
             if (!SetField(ref _isProfilesTab, value)) return;
-            if (value) _isSettingsTab = false;
+            if (value) { _isSettingsTab = false; _isColorManagementTab = false; }
             OnPropertyChanged(nameof(IsControlTab));
+            OnPropertyChanged(nameof(IsSettingsTab));
+            OnPropertyChanged(nameof(IsColorManagementTab));
+        }
+    }
+    public bool IsControlTab
+    {
+        get => !IsProfilesTab && !IsSettingsTab && !IsColorManagementTab;
+        set
+        {
+            if (!value) return;
+            _isProfilesTab = false;
+            _isSettingsTab = false;
+            _isColorManagementTab = false;
+            OnPropertyChanged(nameof(IsControlTab));
+            OnPropertyChanged(nameof(IsProfilesTab));
+            OnPropertyChanged(nameof(IsSettingsTab));
+            OnPropertyChanged(nameof(IsColorManagementTab));
+        }
+    }
+    public bool IsColorManagementTab
+    {
+        get => _isColorManagementTab;
+        set
+        {
+            if (!SetField(ref _isColorManagementTab, value)) return;
+            if (value) { _isProfilesTab = false; _isSettingsTab = false; }
+            OnPropertyChanged(nameof(IsControlTab));
+            OnPropertyChanged(nameof(IsProfilesTab));
             OnPropertyChanged(nameof(IsSettingsTab));
         }
     }
-    public bool IsControlTab => !IsProfilesTab && !IsSettingsTab;
     public bool IsSettingsTab
     {
         get => _isSettingsTab;
         set
         {
             if (!SetField(ref _isSettingsTab, value)) return;
-            if (value) _isProfilesTab = false;
+            if (value) { _isProfilesTab = false; _isColorManagementTab = false; }
             OnPropertyChanged(nameof(IsControlTab));
             OnPropertyChanged(nameof(IsProfilesTab));
+            OnPropertyChanged(nameof(IsColorManagementTab));
         }
     }
     public bool IsLoginStartupSupported => _loginStartupService?.IsSupported == true;
@@ -409,10 +462,17 @@ public sealed partial class ControlViewModel : ObservableObject
         get => _selectedMonitor;
         set
         {
+            var previousDisplayName = GetSelectedDisplayName(_selectedMonitor);
             if (!SetField(ref _selectedMonitor, value)) return;
             RaiseSelectionProperties();
             RaiseProfileCommands();
             if (ApplyRgbAdjustmentCommand is AsyncCommand rgbCommand) rgbCommand.RaiseCanExecuteChanged();
+            var nextDisplayName = GetSelectedDisplayName(value);
+            if (!string.Equals(previousDisplayName, nextDisplayName, StringComparison.OrdinalIgnoreCase))
+            {
+                CancelRgbPreviewDebounce();
+                _ = RestorePendingRgbPreviewAsync();
+            }
             if (!_settingSelectionInternally && value is not null)
             {
                 _ = LoadSelectedMonitorAsync(value);
@@ -473,7 +533,9 @@ public sealed partial class ControlViewModel : ObservableObject
     public bool HasMonitors => SelectedMonitor is not null;
     public bool HasNoMonitors => !IsLoading && !HasScanError && Monitors.Count == 0;
     public bool HasContinuousControls => ContinuousControls.Count > 0;
-    public bool HasNoContinuousControls => HasMonitors && !IsLoading && !HasContinuousControls;
+    public IReadOnlyList<VcpControlViewModel> ControlPanelContinuousControls =>
+        ContinuousControls.Where(control => control.Code is not (0x16 or 0x18 or 0x1A)).ToArray();
+    public bool HasNoContinuousControls => HasMonitors && !IsLoading && ControlPanelContinuousControls.Count == 0;
     public bool HasInputSource => DiscreteControls.Any(control => control.Code == 0x60);
     public string ConnectionStatus => IsLoading || IsScanning
         ? "◌ 正在读取"

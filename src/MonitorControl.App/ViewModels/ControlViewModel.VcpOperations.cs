@@ -141,6 +141,7 @@ public sealed partial class ControlViewModel : ObservableObject
     private void NotifyControlSummaryChanged()
     {
         OnPropertyChanged(nameof(HasContinuousControls));
+        OnPropertyChanged(nameof(ControlPanelContinuousControls));
         OnPropertyChanged(nameof(HasNoContinuousControls));
         OnPropertyChanged(nameof(HasInputSource));
     }
@@ -153,6 +154,7 @@ public sealed partial class ControlViewModel : ObservableObject
         OnPropertyChanged(nameof(HasNoContinuousControls));
         if (RefreshDisplayColorProfilesCommand is AsyncCommand refresh) refresh.RaiseCanExecuteChanged();
         if (ImportDisplayColorProfileCommand is AsyncCommand import) import.RaiseCanExecuteChanged();
+        if (DeleteGeneratedRgbProfileCommand is AsyncCommand delete) delete.RaiseCanExecuteChanged();
         if (ApplyDisplayColorProfileCommand is AsyncCommand apply) apply.RaiseCanExecuteChanged();
         if (RestoreDisplayColorProfileCommand is AsyncCommand restore) restore.RaiseCanExecuteChanged();
     }
