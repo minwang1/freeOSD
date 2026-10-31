@@ -13,6 +13,8 @@ using MonitorControl.Core.Services;
 using MonitorControl.Core.Models;
 using MonitorControl.App.ViewModels;
 using MonitorControl.App.Services;
+using ArcButton = TKCode.Arc.Button;
+using TKCode.Arc.DesignTokens;
 
 namespace MonitorControl.App;
 
@@ -20,17 +22,39 @@ public partial class MainWindow : Window
 {
     private readonly ControlViewModel? _viewModel;
     private readonly WindowSettingsStore _windowSettingsStore = new();
+    private static readonly AppearanceOption[] AppearanceOptions =
+    [
+        new(AppearanceMode.System, "跟随系统"),
+        new(AppearanceMode.Light, "浅色主题"),
+        new(AppearanceMode.Dark, "深色主题")
+    ];
+
+    private static readonly AccentColorOption[] AccentOptions =
+    [
+        new(AccentColor.SoftBlue, "浅蓝色", new SolidColorBrush(Color.FromRgb(105, 151, 190))),
+        new(AccentColor.SoftGreen, "浅绿色", new SolidColorBrush(Color.FromRgb(105, 157, 130))),
+        new(AccentColor.SoftOrange, "浅橘色", new SolidColorBrush(Color.FromRgb(204, 139, 94))),
+        new(AccentColor.Charcoal, "黑色", new SolidColorBrush(Color.FromRgb(80, 88, 96)))
+    ];
+
+    private sealed record AppearanceOption(AppearanceMode Mode, string Label);
+
     public bool AllowClose { get; set; }
     public bool TrayAvailable { get; set; }
 
     public MainWindow()
     {
         InitializeComponent();
+        ConfigureArcPickerTextSelectors();
     }
 
-    public MainWindow(ControlViewModel viewModel)
+    public MainWindow(
+        ControlViewModel viewModel,
+        AppearanceMode appearanceMode = AppearanceMode.System,
+        AccentColor accentColor = AccentColor.SoftBlue)
     {
         InitializeComponent();
+        ConfigureArcPickerTextSelectors();
         _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
         _viewModel.ConfirmInputSourceAsync = ConfirmInputSourceAsync;
         _viewModel.ConfirmDisplayModeTrialAsync = ConfirmDisplayModeTrialAsync;
@@ -39,11 +63,68 @@ public partial class MainWindow : Window
         _viewModel.PromptRgbProfileFileNameAsync = PromptRgbProfileFileNameAsync;
         _viewModel.ConfirmGeneratedRgbProfileDeletionAsync = ConfirmGeneratedRgbProfileDeletionAsync;
         DataContext = _viewModel;
+        ConfigureAppearancePickers(appearanceMode, accentColor);
         Opened += RestoreWindowSettingsAsync;
         Opened += OnOpened;
         Closing += SaveWindowSettings;
         Closing += CloseToTray;
         Closed += OnClosed;
+    }
+
+    private void ConfigureAppearancePickers(AppearanceMode appearanceMode, AccentColor accentColor)
+    {
+        if (this.FindControl<TKCode.Arc.Combobox>("AppearancePicker") is { } appearancePicker)
+        {
+            appearancePicker.ItemsSource = AppearanceOptions;
+            appearancePicker.TextSelector = static item => (item as AppearanceOption)?.Label;
+            appearancePicker.SelectedItem = AppearanceOptions.First(option => option.Mode == appearanceMode);
+            appearancePicker.SelectionChanged += (_, _) =>
+            {
+                if (appearancePicker.SelectedItem is AppearanceOption option)
+                    App.SetAppearanceMode(option.Mode);
+            };
+        }
+
+        if (this.FindControl<TKCode.Arc.Combobox>("AccentPicker") is { } accentPicker)
+        {
+            accentPicker.ItemsSource = AccentOptions;
+            accentPicker.TextSelector = static item => (item as AccentColorOption)?.Label;
+            accentPicker.SelectedItem = AccentOptions.First(option => option.Color == accentColor);
+            accentPicker.SelectionChanged += (_, _) =>
+            {
+                if (accentPicker.SelectedItem is AccentColorOption option)
+                    App.SetAccentColor(option.Color);
+            };
+        }
+    }
+
+    private void ConfigureArcPickerTextSelectors()
+    {
+        if (this.FindControl<TKCode.Arc.Combobox>("MonitorPicker") is { } monitorPicker)
+            monitorPicker.TextSelector = static item => (item as MonitorDescriptor)?.Name;
+        if (this.FindControl<TKCode.Arc.Combobox>("InputSourcePicker") is { } inputPicker)
+            inputPicker.TextSelector = static item => (item as VcpValueOption)?.Label;
+        if (this.FindControl<TKCode.Arc.Combobox>("ResolutionPicker") is { } resolutionPicker)
+            resolutionPicker.TextSelector = static item => item is DisplayMode mode ? $"{mode.Width} × {mode.Height}" : null;
+        if (this.FindControl<TKCode.Arc.Combobox>("RefreshRatePicker") is { } refreshPicker)
+            refreshPicker.TextSelector = static item => item is DisplayMode mode ? $"{mode.RefreshRateHz:0.##} Hz" : null;
+        if (this.FindControl<TKCode.Arc.Combobox>("ProfilePicker") is { } profilePicker)
+            profilePicker.TextSelector = static item => (item as MonitorProfile)?.Name;
+        if (this.FindControl<TKCode.Arc.Combobox>("AutomationRulePicker") is { } rulePicker)
+            rulePicker.TextSelector = static item => item is ApplicationProfileRule rule
+                ? $"{Path.GetFileNameWithoutExtension(rule.ExecutablePath)} → {rule.ProfileName}"
+                : null;
+        if (this.FindControl<TKCode.Arc.Combobox>("FallbackProfilePicker") is { } fallbackPicker)
+            fallbackPicker.TextSelector = static item => (item as MonitorProfile)?.Name;
+        if (this.FindControl<TKCode.Arc.Combobox>("ColorProfilePicker") is { } colorProfilePicker)
+            colorProfilePicker.TextSelector = static item => (item as DisplayColorProfile)?.Name;
+
+        if (this.FindControl<TKCode.Arc.Slider>("RedRgbSlider") is { } redSlider)
+            redSlider.ValueFormatter = static value => $"{value:0}%";
+        if (this.FindControl<TKCode.Arc.Slider>("GreenRgbSlider") is { } greenSlider)
+            greenSlider.ValueFormatter = static value => $"{value:0}%";
+        if (this.FindControl<TKCode.Arc.Slider>("BlueRgbSlider") is { } blueSlider)
+            blueSlider.ValueFormatter = static value => $"{value:0}%";
     }
 
     private async Task<string?> PickDisplayColorProfileFileAsync()
@@ -73,9 +154,14 @@ public partial class MainWindow : Window
             TextWrapping = Avalonia.Media.TextWrapping.Wrap,
             Margin = new Avalonia.Thickness(20, 18, 20, 8)
         };
-        var fileNameBox = new TextBox { Text = defaultFileName, Margin = new Avalonia.Thickness(20, 0, 20, 8) };
-        var cancelButton = new Button { Content = "取消", MinWidth = 88 };
-        var saveButton = new Button { Content = "确认并应用", MinWidth = 110 };
+        var fileNameBox = new TKCode.Arc.Input
+        {
+            Label = "Profile 文件名",
+            Text = defaultFileName,
+            Margin = new Avalonia.Thickness(20, 0, 20, 8)
+        };
+        var cancelButton = new ArcButton { Content = "取消", MinWidth = 88, Variant = TKCode.Arc.ButtonVariant.Secondary, Size = TKCode.Arc.ControlSize.Small };
+        var saveButton = new ArcButton { Content = "确认并应用", MinWidth = 110, Variant = TKCode.Arc.ButtonVariant.Primary, Size = TKCode.Arc.ControlSize.Small };
         var buttons = new StackPanel
         {
             Orientation = Avalonia.Layout.Orientation.Horizontal,
@@ -112,8 +198,8 @@ public partial class MainWindow : Window
             TextWrapping = Avalonia.Media.TextWrapping.Wrap,
             Margin = new Avalonia.Thickness(20, 18, 20, 12)
         };
-        var cancelButton = new Button { Content = "取消", MinWidth = 88 };
-        var deleteButton = new Button { Content = "删除 profile", MinWidth = 110 };
+        var cancelButton = new ArcButton { Content = "取消", MinWidth = 88, Variant = TKCode.Arc.ButtonVariant.Secondary, Size = TKCode.Arc.ControlSize.Small };
+        var deleteButton = new ArcButton { Content = "删除 profile", MinWidth = 110, Variant = TKCode.Arc.ButtonVariant.Danger, Size = TKCode.Arc.ControlSize.Small };
         var buttons = new StackPanel
         {
             Orientation = Avalonia.Layout.Orientation.Horizontal,
@@ -215,10 +301,12 @@ public partial class MainWindow : Window
     {
         if (_viewModel?.InstalledApplicationCatalog is not { } catalog) return null;
         var apps = await catalog.GetApplicationsAsync();
-        var profilePicker = new ComboBox
+        var profilePicker = new TKCode.Arc.Combobox
         {
+            Label = "应用预设",
             ItemsSource = profiles,
             SelectedItem = profiles.FirstOrDefault(profile => string.Equals(profile.Name, defaultProfileName, StringComparison.OrdinalIgnoreCase)) ?? profiles.FirstOrDefault(),
+            TextSelector = static item => (item as MonitorProfile)?.Name,
             Margin = new Avalonia.Thickness(12, 4, 12, 8)
         };
         var title = new TextBlock
@@ -227,34 +315,53 @@ public partial class MainWindow : Window
             Margin = new Avalonia.Thickness(12, 10, 12, 4)
         };
         profilePicker.ItemTemplate = new FuncDataTemplate<MonitorProfile>((profile, _) => new TextBlock { Text = profile?.Name ?? "" });
-        var search = new TextBox { PlaceholderText = "搜索已安装程序", Margin = new Avalonia.Thickness(12, 4, 6, 8) };
-        var previousApplicationButton = new Button { Content = "使用上一个前台程序", Margin = new Avalonia.Thickness(6, 4, 12, 8) };
+        var search = new TKCode.Arc.Input
+        {
+            Label = "搜索已安装程序",
+            Placeholder = "搜索已安装程序",
+            Margin = new Avalonia.Thickness(12, 4, 6, 8)
+        };
+        var previousApplicationButton = new ArcButton
+        {
+            Content = "使用上一个前台程序",
+            Variant = TKCode.Arc.ButtonVariant.Secondary,
+            Size = TKCode.Arc.ControlSize.Small,
+            Margin = new Avalonia.Thickness(6, 4, 12, 8)
+        };
         var selectedApplicationText = new TextBlock
         {
             Text = "未选择程序",
-            Foreground = Brush.Parse("#687386"),
             Margin = new Avalonia.Thickness(12, 0, 12, 8),
             TextWrapping = TextWrapping.Wrap
         };
+        TKCode.Arc.ArcTokens.Bind(selectedApplicationText, TextBlock.ForegroundProperty, ArcDesignTokenKind.TextSecondary);
         string? selectedExecutablePath = null;
         var applicationList = new ListBox
         {
             ItemsSource = apps,
             Margin = new Avalonia.Thickness(12, 0, 12, 8),
             VerticalAlignment = Avalonia.Layout.VerticalAlignment.Stretch,
-            ItemTemplate = new FuncDataTemplate<InstalledApplication>((app, _) => new StackPanel
+            ItemTemplate = new FuncDataTemplate<InstalledApplication>((app, _) =>
             {
-                Orientation = Orientation.Horizontal,
-                Spacing = 10,
-                Children =
+                var executableName = new TextBlock
                 {
-                    new TextBlock { Text = app?.DisplayName ?? "", Width = 330, TextTrimming = TextTrimming.CharacterEllipsis },
-                    new TextBlock { Text = app is null ? "" : Path.GetFileName(app.ExecutablePath), Foreground = Brush.Parse("#687386") }
-                }
+                    Text = app is null ? "" : Path.GetFileName(app.ExecutablePath)
+                };
+                TKCode.Arc.ArcTokens.Bind(executableName, TextBlock.ForegroundProperty, ArcDesignTokenKind.TextSecondary);
+                return new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 10,
+                    Children =
+                    {
+                        new TextBlock { Text = app?.DisplayName ?? "", Width = 330, TextTrimming = TextTrimming.CharacterEllipsis },
+                        executableName
+                    }
+                };
             })
         };
-        var okButton = new Button { Content = "添加规则", MinWidth = 90, IsEnabled = false };
-        var cancelButton = new Button { Content = "取消", MinWidth = 90 };
+        var okButton = new ArcButton { Content = "添加规则", MinWidth = 90, IsEnabled = false, Variant = TKCode.Arc.ButtonVariant.Primary, Size = TKCode.Arc.ControlSize.Small };
+        var cancelButton = new ArcButton { Content = "取消", MinWidth = 90, Variant = TKCode.Arc.ButtonVariant.Secondary, Size = TKCode.Arc.ControlSize.Small };
         var searchRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
         searchRow.Children.Add(search);
         searchRow.Children.Add(previousApplicationButton);
@@ -382,8 +489,8 @@ public partial class MainWindow : Window
             TextWrapping = Avalonia.Media.TextWrapping.Wrap,
             Margin = new Avalonia.Thickness(20, 18, 20, 12)
         };
-        var cancelButton = new Button { Content = "取消", MinWidth = 88 };
-        var confirmButton = new Button { Content = "切换输入源", MinWidth = 108 };
+        var cancelButton = new ArcButton { Content = "取消", MinWidth = 88, Variant = TKCode.Arc.ButtonVariant.Secondary, Size = TKCode.Arc.ControlSize.Small };
+        var confirmButton = new ArcButton { Content = "切换输入源", MinWidth = 108, Variant = TKCode.Arc.ButtonVariant.Primary, Size = TKCode.Arc.ControlSize.Small };
         var buttons = new StackPanel
         {
             Orientation = Avalonia.Layout.Orientation.Horizontal,
@@ -418,8 +525,8 @@ public partial class MainWindow : Window
             TextWrapping = Avalonia.Media.TextWrapping.Wrap,
             Margin = new Avalonia.Thickness(20, 4, 20, 8)
         };
-        var revertButton = new Button { Content = "立即恢复", MinWidth = 96 };
-        var keepButton = new Button { Content = "保留此设置", MinWidth = 110 };
+        var revertButton = new ArcButton { Content = "立即恢复", MinWidth = 96, Variant = TKCode.Arc.ButtonVariant.Secondary, Size = TKCode.Arc.ControlSize.Small };
+        var keepButton = new ArcButton { Content = "保留此设置", MinWidth = 110, Variant = TKCode.Arc.ButtonVariant.Primary, Size = TKCode.Arc.ControlSize.Small };
         var buttons = new StackPanel
         {
             Orientation = Avalonia.Layout.Orientation.Horizontal,

@@ -151,6 +151,7 @@ public sealed partial class ControlViewModel : ObservableObject
         OnPropertyChanged(nameof(HasMonitors));
         OnPropertyChanged(nameof(HasNoMonitors));
         OnPropertyChanged(nameof(ConnectionStatus));
+        OnPropertyChanged(nameof(IsConnected));
         OnPropertyChanged(nameof(HasNoContinuousControls));
         if (RefreshDisplayColorProfilesCommand is AsyncCommand refresh) refresh.RaiseCanExecuteChanged();
         if (ImportDisplayColorProfileCommand is AsyncCommand import) import.RaiseCanExecuteChanged();

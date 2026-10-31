@@ -7,7 +7,10 @@ using System.Windows.Input;
 
 namespace MonitorControl.App.ViewModels;
 
-public sealed record VcpValueOption(uint Value, string Label);
+public sealed record VcpValueOption(uint Value, string Label)
+{
+    public override string ToString() => Label;
+}
 
 public abstract class ObservableObject : INotifyPropertyChanged
 {

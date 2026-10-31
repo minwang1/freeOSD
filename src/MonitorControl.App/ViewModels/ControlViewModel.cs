@@ -494,6 +494,7 @@ public sealed partial class ControlViewModel : ObservableObject
             OnPropertyChanged(nameof(HasNoMonitors));
             OnPropertyChanged(nameof(HasNoContinuousControls));
             OnPropertyChanged(nameof(ConnectionStatus));
+            OnPropertyChanged(nameof(IsConnected));
         }
     }
 
@@ -517,6 +518,7 @@ public sealed partial class ControlViewModel : ObservableObject
             if (!SetField(ref _isScanning, value)) return;
             if (RescanCommand is AsyncCommand command) command.RaiseCanExecuteChanged();
             OnPropertyChanged(nameof(ConnectionStatus));
+            OnPropertyChanged(nameof(IsConnected));
         }
     }
 
@@ -538,8 +540,9 @@ public sealed partial class ControlViewModel : ObservableObject
     public bool HasNoContinuousControls => HasMonitors && !IsLoading && ControlPanelContinuousControls.Count == 0;
     public bool HasInputSource => DiscreteControls.Any(control => control.Code == 0x60);
     public string ConnectionStatus => IsLoading || IsScanning
-        ? "◌ 正在读取"
-        : SelectedMonitor is null ? "● 未连接" : "● 已连接";
+        ? "正在读取"
+        : SelectedMonitor is null ? "未连接" : "已连接";
+    public bool IsConnected => SelectedMonitor is not null && !IsLoading && !IsScanning;
 
     public string StatusText
     {

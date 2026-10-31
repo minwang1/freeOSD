@@ -13,7 +13,10 @@ public sealed record MonitorDescriptor(
     string? Manufacturer = null,
     string? Model = null,
     string? SerialNumber = null,
-    string? ConnectionDescription = null);
+    string? ConnectionDescription = null)
+{
+    public override string ToString() => Name;
+}
 
 public enum VcpFeatureKind
 {

@@ -7,13 +7,16 @@ using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Controls;
+using Avalonia.Media;
 using Avalonia.Platform;
 using MonitorControl.App.Diagnostics;
+using MonitorControl.App.Services;
 using MonitorControl.App.ViewModels;
 using MonitorControl.Core.Abstractions;
 using MonitorControl.Core.Models;
 using MonitorControl.Core.Services;
 using MonitorControl.Platform.Windows;
+using TKCode.Arc;
 
 namespace MonitorControl.App;
 
@@ -26,12 +29,19 @@ public partial class App : Application
     private MainWindow? _mainWindow;
     private IClassicDesktopStyleApplicationLifetime? _desktop;
     private TrayIcon? _trayIcon;
+    private AppearanceSettingsStore _appearanceSettingsStore = null!;
+    private AppearanceMode _appearanceMode;
+    private AccentColor _accentColor;
 
     public override void Initialize()
     {
         _current = this;
         DiagnosticLog.Initialize();
         AvaloniaXamlLoader.Load(this);
+        _appearanceSettingsStore = new AppearanceSettingsStore();
+        var appearanceSettings = _appearanceSettingsStore.Load();
+        _appearanceMode = appearanceSettings.Mode;
+        _accentColor = appearanceSettings.Accent;
     }
 
     public override void OnFrameworkInitializationCompleted()
@@ -52,18 +62,79 @@ public partial class App : Application
                     loginStartupService: new WindowsLoginStartupService(),
                     foregroundApplicationMonitor: new WindowsForegroundApplicationMonitor(),
                     installedApplicationCatalog: new WindowsInstalledApplicationCatalog(),
-                    displayColorProfileService: new WindowsDisplayColorProfileService()));
+                    displayColorProfileService: new WindowsDisplayColorProfileService()), _appearanceMode, _accentColor);
             }
             else
             {
-                desktop.MainWindow = _mainWindow = new MainWindow(new ControlViewModel(new UnsupportedPlatformMonitorBackend()));
+                desktop.MainWindow = _mainWindow = new MainWindow(new ControlViewModel(new UnsupportedPlatformMonitorBackend()), _appearanceMode, _accentColor);
             }
 
             InitializeTrayIcon();
         }
 
         base.OnFrameworkInitializationCompleted();
+
+        try
+        {
+            ApplyArcTheme(_appearanceMode, _accentColor);
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Write("ERROR", "appearance.theme.apply.failed", $"mode={_appearanceMode}; error={exception}");
+            _appearanceMode = AppearanceMode.System;
+        }
     }
+
+    public static void SetAppearanceMode(AppearanceMode mode)
+    {
+        var app = _current;
+        if (app is null) return;
+        app.SetAppearance(mode, app._accentColor);
+    }
+
+    public static void SetAccentColor(AccentColor accentColor)
+    {
+        var app = _current;
+        if (app is null) return;
+        app.SetAppearance(app._appearanceMode, accentColor);
+    }
+
+    private void SetAppearance(AppearanceMode mode, AccentColor accentColor)
+    {
+        if (_appearanceMode == mode && _accentColor == accentColor) return;
+        try
+        {
+            ApplyArcTheme(mode, accentColor);
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Write("ERROR", "appearance.theme.apply.failed", $"mode={mode}; accent={accentColor}; error={exception}");
+            return;
+        }
+
+        _appearanceMode = mode;
+        _accentColor = accentColor;
+        try { _appearanceSettingsStore.Save(new AppearanceSettings(mode, accentColor)); }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Write("WARN", "appearance.settings.save.failed", $"error={exception.Message}");
+        }
+    }
+
+    private static void ApplyArcTheme(AppearanceMode mode, AccentColor accentColor) => ArcTheme.Apply(theme => theme
+        .Appearance(mode switch
+        {
+            AppearanceMode.Light => ArcAppearance.Light,
+            AppearanceMode.Dark => ArcAppearance.Dark,
+            _ => ArcAppearance.System
+        })
+        .Accent(accentColor switch
+        {
+            AccentColor.SoftGreen => Color.FromRgb(105, 157, 130),
+            AccentColor.SoftOrange => Color.FromRgb(204, 139, 94),
+            AccentColor.Charcoal => Color.FromRgb(80, 88, 96),
+            _ => Color.FromRgb(105, 151, 190)
+        }));
 
     private void InitializeTrayIcon()
     {

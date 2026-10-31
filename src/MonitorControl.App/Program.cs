@@ -3,6 +3,7 @@ using System;
 using System.Threading.Tasks;
 using System.Threading;
 using Avalonia.Threading;
+using TKCode.Arc;
 using MonitorControl.App.Diagnostics;
 using MonitorControl.Platform.Windows;
 
@@ -60,5 +61,8 @@ class Program
         => AppBuilder.Configure<App>()
             .UsePlatformDetect()
             .WithInterFont()
+            .UseArc(arc => arc
+                .UseArcControls()
+                .WithTheme(theme => theme.Appearance(ArcAppearance.System).Accent(ArcAccentPreset.Neutral)))
             .LogToTrace();
 }
