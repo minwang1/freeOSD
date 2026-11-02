@@ -19,7 +19,13 @@ public enum AccentColor
     Charcoal
 }
 
-public sealed record AppearanceSettings(AppearanceMode Mode, AccentColor Accent);
+public enum UiLanguage
+{
+    Chinese,
+    English
+}
+
+public sealed record AppearanceSettings(AppearanceMode Mode, AccentColor Accent, UiLanguage Language = UiLanguage.Chinese);
 
 public sealed class AppearanceSettingsStore
 {
@@ -44,7 +50,10 @@ public sealed class AppearanceSettingsStore
             var accent = TryReadEnum(root, "Accent", out AccentColor parsedAccent)
                 ? parsedAccent
                 : AccentColor.SoftBlue;
-            return new AppearanceSettings(mode, accent);
+            var language = TryReadEnum(root, "Language", out UiLanguage parsedLanguage)
+                ? parsedLanguage
+                : UiLanguage.Chinese;
+            return new AppearanceSettings(mode, accent, language);
         }
         catch (IOException)
         {
@@ -67,7 +76,8 @@ public sealed class AppearanceSettingsStore
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(new
         {
             Mode = settings.Mode.ToString(),
-            Accent = settings.Accent.ToString()
+            Accent = settings.Accent.ToString(),
+            Language = settings.Language.ToString()
         }));
         File.Move(temporaryPath, _path, overwrite: true);
     }

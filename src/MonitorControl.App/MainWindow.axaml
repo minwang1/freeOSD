@@ -3,6 +3,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="using:MonitorControl.App.ViewModels"
+        xmlns:loc="using:MonitorControl.App.Services"
         xmlns:core="using:MonitorControl.Core.Models"
         xmlns:arc="https://github.com/AIDotNet/TKCode.Arc"
         mc:Ignorable="d" d:DesignWidth="1100" d:DesignHeight="720"
@@ -41,7 +42,7 @@
                 IsEnabled="{Binding IsUiInteractionEnabled}">
             <Grid ColumnDefinitions="*,Auto,Auto,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="14" RowSpacing="4">
                 <TextBlock Grid.RowSpan="2" Text="Monitor Control" FontSize="{arc:ArcDesignTokenResource TypeXL}" FontWeight="SemiBold" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="1" Text="显示器" Foreground="{arc:ArcDesignTokenResource TextSecondary}" FontSize="{arc:ArcDesignTokenResource TypeXS}" />
+                <TextBlock Grid.Column="1" Text="{loc:Loc Header.Monitor}" Foreground="{arc:ArcDesignTokenResource TextSecondary}" FontSize="{arc:ArcDesignTokenResource TypeXS}" />
                 <arc:Combobox Grid.Row="1" Grid.Column="1" MinWidth="240" Classes="field-picker"
                           ItemsSource="{Binding Monitors}"
                           SelectedItem="{Binding SelectedMonitor, Mode=TwoWay}"
@@ -56,20 +57,20 @@
                     <Ellipse Width="8" Height="8" Fill="{arc:ArcDesignTokenResource AccentStrong}" VerticalAlignment="Center" IsVisible="{Binding IsConnected}" />
                     <TextBlock Text="{Binding ConnectionStatus}" VerticalAlignment="Center" Foreground="{arc:ArcDesignTokenResource TextSecondary}" />
                 </StackPanel>
-                <arc:Button Grid.Row="1" Grid.Column="3" Classes="field-action" Content="⟳ 重新扫描" Command="{Binding RescanCommand}" Variant="Secondary" />
+                <arc:Button Grid.Row="1" Grid.Column="3" Classes="field-action" Content="{loc:Loc Header.Rescan}" Command="{Binding RescanCommand}" Variant="Secondary" />
             </Grid>
         </Border>
 
         <Grid Grid.Row="1" ColumnDefinitions="210,*" IsEnabled="{Binding IsUiInteractionEnabled}">
             <Border Grid.Column="0" Background="{arc:ArcDesignTokenResource Surface}" BorderBrush="{arc:ArcDesignTokenResource BorderSubtle}" BorderThickness="0,0,1,0" Padding="12">
                 <StackPanel Spacing="6">
-                    <arc:Button Content="◉  控制" Classes="nav-item" Classes.nav-selected="{Binding IsControlTab}"
+                    <arc:Button Content="{loc:Loc Nav.Control}" Classes="nav-item" Classes.nav-selected="{Binding IsControlTab}"
                             Click="OnControlTabClick" />
-                    <arc:Button Content="◈  色彩管理" Classes="nav-item" Classes.nav-selected="{Binding IsColorManagementTab}"
+                    <arc:Button Content="{loc:Loc Nav.Color}" Classes="nav-item" Classes.nav-selected="{Binding IsColorManagementTab}"
                             Click="OnColorManagementTabClick" />
-                    <arc:Button Content="▣  预设与自动化" Classes="nav-item" Classes.nav-selected="{Binding IsProfilesTab}"
+                    <arc:Button Content="{loc:Loc Nav.Profiles}" Classes="nav-item" Classes.nav-selected="{Binding IsProfilesTab}"
                             Click="OnProfilesTabClick" />
-                    <arc:Button Content="⚙  设置" Classes="nav-item" Classes.nav-selected="{Binding IsSettingsTab}"
+                    <arc:Button Content="{loc:Loc Nav.Settings}" Classes="nav-item" Classes.nav-selected="{Binding IsSettingsTab}"
                             Click="OnSettingsTabClick" />
                 </StackPanel>
             </Border>
@@ -77,34 +78,34 @@
             <ScrollViewer Grid.Column="1" Padding="28" IsVisible="{Binding IsControlTab}">
                 <StackPanel Spacing="18" MaxWidth="900" HorizontalAlignment="Left">
                     <StackPanel Spacing="4">
-                        <TextBlock Text="控制" FontSize="{arc:ArcDesignTokenResource Type2XL}" FontWeight="SemiBold" />
-                        <TextBlock Text="调节显示器画面、色彩与输入源。只显示当前设备声明支持的控制。" Foreground="{arc:ArcDesignTokenResource TextSecondary}" />
+                        <TextBlock Text="{loc:Loc Page.Control}" FontSize="{arc:ArcDesignTokenResource Type2XL}" FontWeight="SemiBold" />
+                        <TextBlock Text="{loc:Loc Page.ControlDescription}" Foreground="{arc:ArcDesignTokenResource TextSecondary}" />
                     </StackPanel>
 
                     <Border IsVisible="{Binding HasScanError}" Background="{arc:ArcDesignTokenResource Surface}" BorderBrush="{arc:ArcDesignTokenResource DangerSubtle}" BorderThickness="1" CornerRadius="{arc:ArcDesignTokenResource RadiusPanel}" Padding="22">
                         <StackPanel Spacing="10">
-                            <TextBlock Text="无法扫描显示器" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
+                            <TextBlock Text="{loc:Loc '无法扫描显示器'}" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
                             <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" Foreground="{arc:ArcDesignTokenResource Danger}" />
-                            <arc:Button Content="重试扫描" Command="{Binding RescanCommand}" HorizontalAlignment="Left" />
+                            <arc:Button Content="{loc:Loc '重试扫描'}" Command="{Binding RescanCommand}" HorizontalAlignment="Left" />
                         </StackPanel>
                     </Border>
 
                     <Border IsVisible="{Binding HasNoMonitors}" Background="{arc:ArcDesignTokenResource Surface}" BorderBrush="{arc:ArcDesignTokenResource BorderSubtle}" BorderThickness="1" CornerRadius="{arc:ArcDesignTokenResource RadiusPanel}" Padding="22">
                         <StackPanel Spacing="10">
-                            <TextBlock Text="尚未发现可访问的显示器" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
-                            <TextBlock Text="请确认显示器、显卡和连接链路支持 DDC/CI，并在显示器菜单中启用该功能。" TextWrapping="Wrap" Foreground="{arc:ArcDesignTokenResource TextSecondary}" />
-                            <arc:Button Content="重新扫描" Command="{Binding RescanCommand}" HorizontalAlignment="Left" />
+                            <TextBlock Text="{loc:Loc '尚未发现可访问的显示器'}" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
+                            <TextBlock Text="{loc:Loc '请确认显示器、显卡和连接链路支持 DDC/CI，并在显示器菜单中启用该功能。'}" TextWrapping="Wrap" Foreground="{arc:ArcDesignTokenResource TextSecondary}" />
+                            <arc:Button Content="{loc:Loc '重新扫描'}" Command="{Binding RescanCommand}" HorizontalAlignment="Left" />
                         </StackPanel>
                     </Border>
 
                     <Border IsVisible="{Binding HasMonitors}" Background="{arc:ArcDesignTokenResource Surface}" BorderBrush="{arc:ArcDesignTokenResource BorderSubtle}" BorderThickness="1" CornerRadius="{arc:ArcDesignTokenResource RadiusPanel}" Padding="22">
                         <StackPanel Spacing="16">
-                            <TextBlock Text="画面与色彩" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
+                            <TextBlock Text="{loc:Loc '画面与色彩'}" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
                             <ItemsControl ItemsSource="{Binding ControlPanelContinuousControls}">
                                 <ItemsControl.ItemTemplate>
                                 <DataTemplate x:DataType="vm:VcpControlViewModel">
                                         <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto" Margin="0,5">
-                                            <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+                                            <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center" />
                                             <arc:Slider Grid.Column="1" Minimum="{Binding Minimum}" Maximum="{Binding Maximum}"
                                                     Value="{Binding Value, Mode=TwoWay}"
                                                     IsEnabled="{Binding IsReadable}"
@@ -116,24 +117,24 @@
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
-                            <TextBlock Text="当前显示器未声明可调节的亮度或对比度控件。"
+                            <TextBlock Text="{loc:Loc '当前显示器未声明可调节的亮度或对比度控件。'}"
                                        Foreground="{arc:ArcDesignTokenResource TextSecondary}" IsVisible="{Binding HasNoContinuousControls}" />
 
                             <ItemsControl ItemsSource="{Binding DiscreteControls}">
                                 <ItemsControl.ItemTemplate>
                                 <DataTemplate x:DataType="vm:VcpControlViewModel">
                                         <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto" RowSpacing="4" Margin="0,5">
-                                            <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+                                            <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center" />
                                             <arc:Combobox x:Name="InputSourcePicker" Grid.Row="1" Grid.Column="0" Classes="field-picker" ItemsSource="{Binding Options}"
                                                       SelectedItem="{Binding SelectedOption, Mode=TwoWay}"
                                                       IsEnabled="{Binding IsReadable}">
                                                 <arc:Combobox.ItemTemplate>
                                                     <DataTemplate x:DataType="vm:VcpValueOption">
-                                                        <TextBlock Text="{Binding Label}" />
+                                                        <TextBlock Text="{Binding LocalizedLabel}" />
                                                     </DataTemplate>
                                                 </arc:Combobox.ItemTemplate>
                                             </arc:Combobox>
-                                            <arc:Button Grid.Row="1" Grid.Column="1" Classes="field-action" Content="应用" Command="{Binding ApplyCommand}" Margin="10,0,0,0" />
+                                            <arc:Button Grid.Row="1" Grid.Column="1" Classes="field-action" Content="{loc:Loc '应用'}" Command="{Binding ApplyCommand}" Margin="10,0,0,0" />
                                             <TextBlock Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2"
                                                        Text="{Binding ErrorText}" Foreground="{arc:ArcDesignTokenResource Danger}" FontSize="{arc:ArcDesignTokenResource TypeXS}"
                                                        IsVisible="{Binding HasError}" TextWrapping="Wrap" />
@@ -141,7 +142,7 @@
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
-                            <TextBlock Text="切换输入源可能导致画面暂时中断。点击“应用”后会再次确认。"
+                            <TextBlock Text="{loc:Loc '切换输入源可能导致画面暂时中断。点击“应用”后会再次确认。'}"
                                        Foreground="{arc:ArcDesignTokenResource TextSecondary}" FontSize="{arc:ArcDesignTokenResource TypeXS}" IsVisible="{Binding HasInputSource}" />
                         </StackPanel>
                     </Border>
@@ -159,9 +160,9 @@
 
                     <Border IsVisible="{Binding HasRefreshRateSection}" Background="{arc:ArcDesignTokenResource Surface}" BorderBrush="{arc:ArcDesignTokenResource BorderSubtle}" BorderThickness="1" CornerRadius="{arc:ArcDesignTokenResource RadiusPanel}" Padding="22">
                         <StackPanel Spacing="12">
-                            <TextBlock Text="分辨率" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
+                            <TextBlock Text="{loc:Loc '分辨率'}" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
                             <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="12" RowSpacing="4">
-                                <TextBlock Text="目标分辨率" VerticalAlignment="Center" />
+                                <TextBlock Text="{loc:Loc '目标分辨率'}" VerticalAlignment="Center" />
                                 <arc:Combobox x:Name="ResolutionPicker" Grid.Row="1" Grid.Column="0" Classes="field-picker" ItemsSource="{Binding ResolutionModes}"
                                           SelectedItem="{Binding SelectedResolutionMode, Mode=TwoWay}"
                                           IsEnabled="{Binding CanSetResolution}">
@@ -175,19 +176,19 @@
                                         </DataTemplate>
                                     </arc:Combobox.ItemTemplate>
                                 </arc:Combobox>
-                                <arc:Button Grid.Row="1" Grid.Column="1" Classes="field-action" Content="应用分辨率（15 秒试用）"
+                                <arc:Button Grid.Row="1" Grid.Column="1" Classes="field-action" Content="{loc:Loc '应用分辨率（15 秒试用）'}"
                                         Command="{Binding ApplyResolutionCommand}" Variant="Primary" />
                             </Grid>
                             <TextBlock Text="{Binding ResolutionStatusText}" Foreground="{arc:ArcDesignTokenResource TextSecondary}" TextWrapping="Wrap" />
                             <TextBlock Text="{Binding ResolutionError}" Foreground="{arc:ArcDesignTokenResource Danger}" FontSize="{arc:ArcDesignTokenResource TypeXS}"
                                        IsVisible="{Binding HasResolutionError}" TextWrapping="Wrap" />
-                            <TextBlock Text="系统没有报告可用分辨率。" Foreground="{arc:ArcDesignTokenResource TextSecondary}"
+                            <TextBlock Text="{loc:Loc '系统没有报告可用分辨率。'}" Foreground="{arc:ArcDesignTokenResource TextSecondary}"
                                        IsVisible="{Binding HasNoResolutionModes}" />
 
                             <Separator Margin="0,4" />
-                            <TextBlock Text="刷新率" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
+                            <TextBlock Text="{loc:Loc '刷新率'}" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
                             <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="12" RowSpacing="4">
-                                <TextBlock Text="目标刷新率" VerticalAlignment="Center" />
+                                <TextBlock Text="{loc:Loc '目标刷新率'}" VerticalAlignment="Center" />
                                 <arc:Combobox x:Name="RefreshRatePicker" Grid.Row="1" Grid.Column="0" Classes="field-picker" ItemsSource="{Binding RefreshRateModes}"
                                           SelectedItem="{Binding SelectedRefreshRateMode, Mode=TwoWay}"
                                           IsEnabled="{Binding CanSetRefreshRate}">
@@ -197,15 +198,15 @@
                                         </DataTemplate>
                                     </arc:Combobox.ItemTemplate>
                                 </arc:Combobox>
-                                <arc:Button Grid.Row="1" Grid.Column="1" Classes="field-action" Content="应用刷新率（15 秒试用）"
+                                <arc:Button Grid.Row="1" Grid.Column="1" Classes="field-action" Content="{loc:Loc '应用刷新率（15 秒试用）'}"
                                         Command="{Binding ApplyRefreshRateCommand}" Variant="Primary" />
                             </Grid>
                             <TextBlock Text="{Binding RefreshRateStatusText}" Foreground="{arc:ArcDesignTokenResource TextSecondary}" TextWrapping="Wrap" />
                             <TextBlock Text="{Binding RefreshRateError}" Foreground="{arc:ArcDesignTokenResource Danger}" FontSize="{arc:ArcDesignTokenResource TypeXS}"
                                        IsVisible="{Binding HasRefreshRateError}" TextWrapping="Wrap" />
-                            <TextBlock Text="所选分辨率没有可用刷新率选项。" Foreground="{arc:ArcDesignTokenResource TextSecondary}"
+                            <TextBlock Text="{loc:Loc '所选分辨率没有可用刷新率选项。'}" Foreground="{arc:ArcDesignTokenResource TextSecondary}"
                                        IsVisible="{Binding HasNoRefreshRateModes}" />
-                            <arc:Button Content="重试恢复上一次设置" Command="{Binding RetryRefreshRateRestoreCommand}"
+                            <arc:Button Content="{loc:Loc '重试恢复上一次设置'}" Command="{Binding RetryRefreshRateRestoreCommand}"
                                     IsVisible="{Binding HasRefreshRateRestoreFailure}" HorizontalAlignment="Left" />
                         </StackPanel>
                     </Border>
@@ -214,39 +215,39 @@
             <ScrollViewer Grid.Column="1" Padding="28" IsVisible="{Binding IsProfilesTab}">
                 <StackPanel Spacing="18" MaxWidth="900" HorizontalAlignment="Left">
                     <StackPanel Spacing="4">
-                        <TextBlock Text="预设与自动化" FontSize="{arc:ArcDesignTokenResource Type2XL}" FontWeight="SemiBold" />
-                        <TextBlock Text="保存显示器预设，并可按前台应用自动应用。" Foreground="{arc:ArcDesignTokenResource TextSecondary}" />
+                        <TextBlock Text="{loc:Loc '预设与自动化'}" FontSize="{arc:ArcDesignTokenResource Type2XL}" FontWeight="SemiBold" />
+                        <TextBlock Text="{loc:Loc '保存显示器预设，并可按前台应用自动应用。'}" Foreground="{arc:ArcDesignTokenResource TextSecondary}" />
                     </StackPanel>
                     <Border IsVisible="{Binding HasMonitors}" Background="{arc:ArcDesignTokenResource Surface}" BorderBrush="{arc:ArcDesignTokenResource BorderSubtle}" BorderThickness="1" CornerRadius="{arc:ArcDesignTokenResource RadiusPanel}" Padding="22">
                         <StackPanel Spacing="12">
-                            <TextBlock Text="显示器预设" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
-                            <TextBlock Text="保存当前已确认的 VCP 控件值和已应用的 RGB 校准参数。应用时会逐项写入并验证；自动切换也会应用匹配预设中的 RGB 校准。" Foreground="{arc:ArcDesignTokenResource TextSecondary}" TextWrapping="Wrap" />
+                            <TextBlock Text="{loc:Loc '显示器预设'}" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
+                            <TextBlock Text="{loc:Loc '保存当前已确认的 VCP 控件值和已应用的 RGB 校准参数。应用时会逐项写入并验证；自动切换也会应用匹配预设中的 RGB 校准。'}" Foreground="{arc:ArcDesignTokenResource TextSecondary}" TextWrapping="Wrap" />
                             <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="4">
-                                <TextBlock Text="预设名称" />
-                                <arc:Input Grid.Row="1" Classes="field-picker" Placeholder="输入预设名称" Text="{Binding ProfileName, Mode=TwoWay}" />
-                                <arc:Button Grid.Row="1" Grid.Column="1" Classes="field-action" Content="保存当前设置" Command="{Binding SaveProfileCommand}" Variant="Primary" />
+                                <TextBlock Text="{loc:Loc '预设名称'}" />
+                                <arc:Input Grid.Row="1" Classes="field-picker" Placeholder="{loc:Loc '输入预设名称'}" Text="{Binding ProfileName, Mode=TwoWay}" />
+                                <arc:Button Grid.Row="1" Grid.Column="1" Classes="field-action" Content="{loc:Loc '保存当前设置'}" Command="{Binding SaveProfileCommand}" Variant="Primary" />
                             </Grid>
                             <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="4">
-                                <TextBlock Text="已保存预设" Grid.ColumnSpan="3" />
+                                <TextBlock Text="{loc:Loc '已保存预设'}" Grid.ColumnSpan="3" />
                                 <arc:Combobox x:Name="ProfilePicker" Grid.Row="1" Classes="field-picker" ItemsSource="{Binding Profiles}" SelectedItem="{Binding SelectedProfile, Mode=TwoWay}">
                                     <arc:Combobox.ItemTemplate>
                                         <DataTemplate x:DataType="core:MonitorProfile"><TextBlock Text="{Binding Name}" /></DataTemplate>
                                     </arc:Combobox.ItemTemplate>
                                 </arc:Combobox>
-                                <arc:Button Grid.Row="1" Grid.Column="1" Classes="field-action" Content="应用预设" Command="{Binding ApplyProfileCommand}" Variant="Primary" />
-                                <arc:Button Grid.Row="1" Grid.Column="2" Classes="field-action" Content="删除" Command="{Binding DeleteProfileCommand}" Variant="Danger" />
+                                <arc:Button Grid.Row="1" Grid.Column="1" Classes="field-action" Content="{loc:Loc '应用预设'}" Command="{Binding ApplyProfileCommand}" Variant="Primary" />
+                                <arc:Button Grid.Row="1" Grid.Column="2" Classes="field-action" Content="{loc:Loc '删除'}" Command="{Binding DeleteProfileCommand}" Variant="Danger" />
                             </Grid>
                             <TextBlock Text="{Binding ProfileStatus}" Foreground="{arc:ArcDesignTokenResource TextSecondary}" TextWrapping="Wrap" />
                             <Separator Margin="0,4" />
-                            <TextBlock Text="应用切换" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
+                            <TextBlock Text="{loc:Loc '应用切换'}" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
                             <Grid ColumnDefinitions="Auto,*,Auto,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="4">
-                                <arc:Switch Grid.RowSpan="2" Content="为前台应用切换预设"
+                                <arc:Switch Grid.RowSpan="2" Content="{loc:Loc '为前台应用切换预设'}"
                                           IsChecked="{Binding IsAutomationEnabled, Mode=TwoWay}"
                                           IsEnabled="{Binding IsAutomationSupported}" VerticalAlignment="Center" />
-                                <TextBlock Grid.Row="0" Grid.Column="1" Text="应用规则" />
+                                <TextBlock Grid.Row="0" Grid.Column="1" Text="{loc:Loc '应用规则'}" />
                                 <arc:Combobox x:Name="AutomationRulePicker" Grid.Row="1" Grid.Column="1" Classes="field-picker" ItemsSource="{Binding AutomationRules}"
                                           SelectedItem="{Binding SelectedAutomationRule, Mode=TwoWay}"
-                                          Placeholder="暂无应用规则">
+                                          Placeholder="{loc:Loc '暂无应用规则'}">
                                     <arc:Combobox.ItemTemplate>
                                         <DataTemplate x:DataType="core:ApplicationProfileRule">
                                             <StackPanel Orientation="Horizontal" Spacing="8">
@@ -257,57 +258,57 @@
                                         </DataTemplate>
                                     </arc:Combobox.ItemTemplate>
                                 </arc:Combobox>
-                                <arc:Button Grid.Row="1" Grid.Column="2" Classes="field-action" Content="添加规则…" Command="{Binding AddAutomationRuleCommand}" />
-                                <arc:Button Grid.Row="1" Grid.Column="3" Classes="field-action" Content="删除规则" Command="{Binding RemoveAutomationRuleCommand}" Variant="Danger" />
+                                <arc:Button Grid.Row="1" Grid.Column="2" Classes="field-action" Content="{loc:Loc '添加规则…'}" Command="{Binding AddAutomationRuleCommand}" />
+                                <arc:Button Grid.Row="1" Grid.Column="3" Classes="field-action" Content="{loc:Loc '删除规则'}" Command="{Binding RemoveAutomationRuleCommand}" Variant="Danger" />
                             </Grid>
                             <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
-                                <arc:Combobox x:Name="FallbackProfilePicker" Grid.Column="0" Grid.ColumnSpan="2" Label="无匹配规则时使用" ItemsSource="{Binding Profiles}"
+                                <arc:Combobox x:Name="FallbackProfilePicker" Grid.Column="0" Grid.ColumnSpan="2" Label="{loc:Loc '无匹配规则时使用'}" ItemsSource="{Binding Profiles}"
                                           SelectedItem="{Binding DefaultAutomationProfile, Mode=TwoWay}"
-                                          Placeholder="不应用预设">
+                                          Placeholder="{loc:Loc '不应用预设'}">
                                     <arc:Combobox.ItemTemplate>
                                         <DataTemplate x:DataType="core:MonitorProfile"><TextBlock Text="{Binding Name}" /></DataTemplate>
                                     </arc:Combobox.ItemTemplate>
                                 </arc:Combobox>
                             </Grid>
-                            <TextBlock Text="添加规则时可搜索已安装程序，或使用上一个前台程序。程序规则优先匹配；未命中时应用默认预设。删除预设会同步移除关联规则，自动应用会跳过输入源设置。"
+                            <TextBlock Text="{loc:Loc '添加规则时可搜索已安装程序，或使用上一个前台程序。程序规则优先匹配；未命中时应用默认预设。删除预设会同步移除关联规则，自动应用会跳过输入源设置。'}"
                                        Foreground="{arc:ArcDesignTokenResource TextSecondary}" TextWrapping="Wrap" />
-                            <TextBlock Text="还没有已保存的预设。请先在上方保存预设，再创建应用规则。"
+                            <TextBlock Text="{loc:Loc '还没有已保存的预设。请先在上方保存预设，再创建应用规则。'}"
                                        Foreground="{arc:ArcDesignTokenResource TextSecondary}" IsVisible="{Binding HasNoProfiles}" TextWrapping="Wrap" />
                             <TextBlock Text="{Binding AutomationStatus}" Foreground="{arc:ArcDesignTokenResource TextSecondary}" TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>
                     <Border IsVisible="{Binding HasNoMonitors}" Background="{arc:ArcDesignTokenResource Surface}" BorderBrush="{arc:ArcDesignTokenResource BorderSubtle}" BorderThickness="1" CornerRadius="{arc:ArcDesignTokenResource RadiusPanel}" Padding="22">
                         <StackPanel Spacing="8">
-                            <TextBlock Text="连接显示器后即可创建和应用预设。" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
-                            <TextBlock Text="请先扫描并选择可访问的显示器。" Foreground="{arc:ArcDesignTokenResource TextSecondary}" />
+                            <TextBlock Text="{loc:Loc '连接显示器后即可创建和应用预设。'}" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
+                            <TextBlock Text="{loc:Loc '请先扫描并选择可访问的显示器。'}" Foreground="{arc:ArcDesignTokenResource TextSecondary}" />
                         </StackPanel>
                     </Border>
                 </StackPanel>
             </ScrollViewer>
             <ScrollViewer Grid.Column="1" Padding="28" IsVisible="{Binding IsColorManagementTab}">
                 <StackPanel Spacing="18" MaxWidth="900" HorizontalAlignment="Left">
-                    <TextBlock Text="色彩管理" FontSize="{arc:ArcDesignTokenResource Type2XL}" FontWeight="SemiBold" />
+                    <TextBlock Text="{loc:Loc '色彩管理'}" FontSize="{arc:ArcDesignTokenResource Type2XL}" FontWeight="SemiBold" />
                     <Border Background="{arc:ArcDesignTokenResource Surface}" BorderBrush="{arc:ArcDesignTokenResource BorderSubtle}" BorderThickness="1" CornerRadius="{arc:ArcDesignTokenResource RadiusPanel}" Padding="22">
                         <StackPanel Spacing="12">
-                            <TextBlock Text="RGB 色彩调整（SDR）" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
-                            <TextBlock Text="拖动停止后会临时预览颜色；点击应用时可命名并保存 SDR RGB ICC profile。100% 为中性，范围 50–150%。首次应用会保存原始 ICC，可随时恢复。HDR 模式暂不支持此校准方式。"
+                            <TextBlock Text="{loc:Loc 'RGB 色彩调整（SDR）'}" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
+                            <TextBlock Text="{loc:Loc '拖动停止后会临时预览颜色；点击应用时可命名并保存 SDR RGB ICC profile。100% 为中性，范围 50–150%。首次应用会保存原始 ICC，可随时恢复。HDR 模式暂不支持此校准方式。'}"
                                        Foreground="{arc:ArcDesignTokenResource TextSecondary}" TextWrapping="Wrap" />
                             <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
-                                <arc:Slider x:Name="RedRgbSlider" Grid.Column="1" Minimum="50" Maximum="150" SmallChange="1" Label="红色"
+                                <arc:Slider x:Name="RedRgbSlider" Grid.Column="1" Minimum="50" Maximum="150" SmallChange="1" Label="{loc:Loc '红色'}"
                                         Value="{Binding RedRgbGainPercent, Mode=TwoWay}" IsEnabled="{Binding IsDisplayColorProfileSupported}" />
                             </Grid>
                             <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
-                                <arc:Slider x:Name="GreenRgbSlider" Grid.Column="1" Minimum="50" Maximum="150" SmallChange="1" Label="绿色"
+                                <arc:Slider x:Name="GreenRgbSlider" Grid.Column="1" Minimum="50" Maximum="150" SmallChange="1" Label="{loc:Loc '绿色'}"
                                         Value="{Binding GreenRgbGainPercent, Mode=TwoWay}" IsEnabled="{Binding IsDisplayColorProfileSupported}" />
                             </Grid>
                             <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
-                                <arc:Slider x:Name="BlueRgbSlider" Grid.Column="1" Minimum="50" Maximum="150" SmallChange="1" Label="蓝色"
+                                <arc:Slider x:Name="BlueRgbSlider" Grid.Column="1" Minimum="50" Maximum="150" SmallChange="1" Label="{loc:Loc '蓝色'}"
                                         Value="{Binding BlueRgbGainPercent, Mode=TwoWay}" IsEnabled="{Binding IsDisplayColorProfileSupported}" />
                             </Grid>
                             <StackPanel Orientation="Horizontal" Spacing="10">
-                                <arc:Button Content="应用 RGB 调整" Command="{Binding ApplyRgbAdjustmentCommand}" Variant="Primary" />
-                                <arc:Button Content="重置为 100%" Command="{Binding ResetRgbAdjustmentCommand}" />
-                                <arc:Button Content="恢复原配置" Command="{Binding RestoreDisplayColorProfileCommand}"
+                                <arc:Button Content="{loc:Loc '应用 RGB 调整'}" Command="{Binding ApplyRgbAdjustmentCommand}" Variant="Primary" />
+                                <arc:Button Content="{loc:Loc '重置为 100%'}" Command="{Binding ResetRgbAdjustmentCommand}" />
+                                <arc:Button Content="{loc:Loc '恢复原配置'}" Command="{Binding RestoreDisplayColorProfileCommand}"
                                         IsEnabled="{Binding HasOriginalDisplayColorProfile}" />
                             </StackPanel>
                             <TextBlock Text="{Binding RgbGainPendingStatus}" Foreground="{arc:ArcDesignTokenResource Foreground}" />
@@ -316,14 +317,14 @@
                     </Border>
                     <Border Background="{arc:ArcDesignTokenResource Surface}" BorderBrush="{arc:ArcDesignTokenResource BorderSubtle}" BorderThickness="1" CornerRadius="{arc:ArcDesignTokenResource RadiusPanel}" Padding="22">
                         <StackPanel Spacing="10">
-                            <TextBlock Text="Windows ICC 色彩配置文件" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
-                            <TextBlock Text="应用已关联到当前显示器的 ICC 配置文件。首次应用会保存当前配置，之后可恢复。" Foreground="{arc:ArcDesignTokenResource TextSecondary}" TextWrapping="Wrap" />
+                            <TextBlock Text="{loc:Loc 'Windows ICC 色彩配置文件'}" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
+                            <TextBlock Text="{loc:Loc '应用已关联到当前显示器的 ICC 配置文件。首次应用会保存当前配置，之后可恢复。'}" Foreground="{arc:ArcDesignTokenResource TextSecondary}" TextWrapping="Wrap" />
                             <StackPanel Orientation="Horizontal" Spacing="10">
-                                <arc:Button Content="导入 ICC/ICM 文件…" Command="{Binding ImportDisplayColorProfileCommand}" />
-                                <arc:Button Content="刷新列表" Command="{Binding RefreshDisplayColorProfilesCommand}" />
+                                <arc:Button Content="{loc:Loc '导入 ICC/ICM 文件…'}" Command="{Binding ImportDisplayColorProfileCommand}" />
+                                <arc:Button Content="{loc:Loc '刷新列表'}" Command="{Binding RefreshDisplayColorProfilesCommand}" />
                             </StackPanel>
                             <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="10" RowSpacing="4">
-                                <TextBlock Text="色彩配置文件" Grid.ColumnSpan="3" />
+                                <TextBlock Text="{loc:Loc '色彩配置文件'}" Grid.ColumnSpan="3" />
                                 <arc:Combobox x:Name="ColorProfilePicker" Grid.Row="1" Classes="field-picker" ItemsSource="{Binding DisplayColorProfiles}"
                                           SelectedItem="{Binding SelectedDisplayColorProfile, Mode=TwoWay}"
                                           IsEnabled="{Binding IsDisplayColorProfileSupported}">
@@ -333,33 +334,33 @@
                                         </DataTemplate>
                                     </arc:Combobox.ItemTemplate>
                                 </arc:Combobox>
-                                <arc:Button Grid.Row="1" Grid.Column="1" Classes="field-action" Content="删除" Command="{Binding DeleteGeneratedRgbProfileCommand}" Variant="Danger"
+                                <arc:Button Grid.Row="1" Grid.Column="1" Classes="field-action" Content="{loc:Loc '删除'}" Command="{Binding DeleteGeneratedRgbProfileCommand}" Variant="Danger"
                                         IsEnabled="{Binding CanDeleteSelectedGeneratedRgbProfile}" />
-                                <TextBlock Grid.Row="1" Grid.Column="2" Text="默认项" VerticalAlignment="Center" Foreground="{arc:ArcDesignTokenResource TextSecondary}" />
+                                <TextBlock Grid.Row="1" Grid.Column="2" Text="{loc:Loc '默认项'}" VerticalAlignment="Center" Foreground="{arc:ArcDesignTokenResource TextSecondary}" />
                             </Grid>
                             <StackPanel Orientation="Horizontal" Spacing="10">
-                                <arc:Button Content="应用配置文件" Command="{Binding ApplyDisplayColorProfileCommand}" Variant="Primary" />
-                                <arc:Button Content="恢复原配置" Command="{Binding RestoreDisplayColorProfileCommand}"
+                                <arc:Button Content="{loc:Loc '应用配置文件'}" Command="{Binding ApplyDisplayColorProfileCommand}" Variant="Primary" />
+                                <arc:Button Content="{loc:Loc '恢复原配置'}" Command="{Binding RestoreDisplayColorProfileCommand}"
                                         IsEnabled="{Binding HasOriginalDisplayColorProfile}" />
                             </StackPanel>
                             <TextBlock Text="{Binding DisplayColorProfileStatus}" Foreground="{arc:ArcDesignTokenResource TextSecondary}" TextWrapping="Wrap" />
                             <TextBlock Text="{Binding DisplayColorProfileInspectionStatus}" Foreground="{arc:ArcDesignTokenResource Foreground}" TextWrapping="Wrap" />
                             <TextBlock Text="{Binding DisplayColorPipelineStatus}" Foreground="{arc:ArcDesignTokenResource Foreground}" TextWrapping="Wrap" />
-                            <TextBlock Text="安装新 profile 需要管理员权限。随附的 test-srgb.icm 只用于检查导入和关联流程，不含校准曲线，不能作为可见色彩校正效果的测试文件。" FontSize="{arc:ArcDesignTokenResource TypeXS}" Foreground="{arc:ArcDesignTokenResource TextSecondary}" TextWrapping="Wrap" />
+                            <TextBlock Text="{loc:Loc '安装新 profile 需要管理员权限。随附的 test-srgb.icm 只用于检查导入和关联流程，不含校准曲线，不能作为可见色彩校正效果的测试文件。'}" FontSize="{arc:ArcDesignTokenResource TypeXS}" Foreground="{arc:ArcDesignTokenResource TextSecondary}" TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>
                 </StackPanel>
             </ScrollViewer>
             <ScrollViewer Grid.Column="1" Padding="28" IsVisible="{Binding IsSettingsTab}">
                 <StackPanel Spacing="18" MaxWidth="900" HorizontalAlignment="Left">
-                    <TextBlock Text="设置" FontSize="{arc:ArcDesignTokenResource Type2XL}" FontWeight="SemiBold" />
+                    <TextBlock Text="{loc:Loc Settings.Title}" FontSize="{arc:ArcDesignTokenResource Type2XL}" FontWeight="SemiBold" />
                     <Border Background="{arc:ArcDesignTokenResource Surface}" BorderBrush="{arc:ArcDesignTokenResource BorderSubtle}" BorderThickness="1" CornerRadius="{arc:ArcDesignTokenResource RadiusPanel}" Padding="22">
                         <Grid ColumnDefinitions="*,280" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="20" RowSpacing="7">
-                            <TextBlock Text="外观主题" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
-                            <TextBlock Grid.Row="1" Text="选择浅色或深色主题，也可以跟随系统外观自动切换。" Foreground="{arc:ArcDesignTokenResource TextSecondary}" TextWrapping="Wrap" />
+                            <TextBlock Text="{loc:Loc Settings.Appearance}" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
+                            <TextBlock Grid.Row="1" Text="{loc:Loc Settings.AppearanceDescription}" Foreground="{arc:ArcDesignTokenResource TextSecondary}" TextWrapping="Wrap" />
                             <arc:Combobox x:Name="AppearancePicker" Grid.Column="1" Grid.RowSpan="2" Classes="field-picker" VerticalAlignment="Center" />
-                            <TextBlock Grid.Row="2" Text="主题色" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" Margin="0,10,0,0" />
-                            <TextBlock Grid.Row="3" Text="柔和的强调色会自动适配浅色和深色界面。" Foreground="{arc:ArcDesignTokenResource TextSecondary}" TextWrapping="Wrap" />
+                            <TextBlock Grid.Row="2" Text="{loc:Loc Settings.Accent}" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" Margin="0,10,0,0" />
+                            <TextBlock Grid.Row="3" Text="{loc:Loc Settings.AccentDescription}" Foreground="{arc:ArcDesignTokenResource TextSecondary}" TextWrapping="Wrap" />
                             <arc:Combobox x:Name="AccentPicker" Grid.Column="1" Grid.Row="2" Grid.RowSpan="2" Classes="field-picker" VerticalAlignment="Center" Margin="0,10,0,0">
                                 <arc:Combobox.ItemTemplate>
                                     <DataTemplate x:DataType="vm:AccentColorOption">
@@ -374,12 +375,25 @@
                     </Border>
                     <Border Background="{arc:ArcDesignTokenResource Surface}" BorderBrush="{arc:ArcDesignTokenResource BorderSubtle}" BorderThickness="1" CornerRadius="{arc:ArcDesignTokenResource RadiusPanel}" Padding="22">
                         <StackPanel Spacing="10">
-                            <TextBlock Text="启动与托盘" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
-                            <arc:Switch Content="登录 Windows 时启动 Monitor Control"
+                            <TextBlock Text="{loc:Loc Settings.Startup}" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
+                            <arc:Switch Content="{loc:Loc Settings.LoginStartup}"
                                       IsChecked="{Binding LoginStartupEnabled, Mode=TwoWay}"
                                       IsEnabled="{Binding IsLoginStartupSupported}" />
                             <TextBlock Text="{Binding LoginStartupStatus}" Foreground="{arc:ArcDesignTokenResource TextSecondary}" TextWrapping="Wrap" />
                         </StackPanel>
+                    </Border>
+                    <Border Background="{arc:ArcDesignTokenResource Surface}" BorderBrush="{arc:ArcDesignTokenResource BorderSubtle}" BorderThickness="1" CornerRadius="{arc:ArcDesignTokenResource RadiusPanel}" Padding="22">
+                        <Grid ColumnDefinitions="*,280" RowDefinitions="Auto,Auto" ColumnSpacing="20" RowSpacing="7">
+                            <TextBlock Text="{loc:Loc Settings.Language}" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
+                            <TextBlock Grid.Row="1" Text="{loc:Loc Settings.LanguageDescription}" Foreground="{arc:ArcDesignTokenResource TextSecondary}" TextWrapping="Wrap" />
+                            <arc:Combobox x:Name="LanguagePicker" Grid.Column="1" Grid.RowSpan="2" Classes="field-picker" VerticalAlignment="Center" />
+                        </Grid>
+                    </Border>
+                    <Border Background="{arc:ArcDesignTokenResource Surface}" BorderBrush="{arc:ArcDesignTokenResource BorderSubtle}" BorderThickness="1" CornerRadius="{arc:ArcDesignTokenResource RadiusPanel}" Padding="22">
+                        <Grid ColumnDefinitions="*,280">
+                            <TextBlock Text="{loc:Loc Settings.Version}" FontSize="{arc:ArcDesignTokenResource TypeLG}" FontWeight="SemiBold" />
+                            <TextBlock x:Name="VersionText" Grid.Column="1" VerticalAlignment="Center" Foreground="{arc:ArcDesignTokenResource TextSecondary}" />
+                        </Grid>
                     </Border>
                 </StackPanel>
             </ScrollViewer>
@@ -389,7 +403,7 @@
                 HorizontalAlignment="Stretch" VerticalAlignment="Stretch" IsHitTestVisible="True">
             <Border HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,14,0,0"
                     Background="{arc:ArcDesignTokenResource Surface}" BorderBrush="{arc:ArcDesignTokenResource BorderSubtle}" BorderThickness="1" CornerRadius="{arc:ArcDesignTokenResource RadiusControl}" Padding="14,8">
-                <TextBlock Text="正在刷新显示器状态…" Foreground="{arc:ArcDesignTokenResource Foreground}" />
+                <TextBlock Text="{loc:Loc '正在刷新显示器状态…'}" Foreground="{arc:ArcDesignTokenResource Foreground}" />
             </Border>
         </Border>
 

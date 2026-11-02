@@ -379,12 +379,12 @@ public sealed partial class ControlViewModel : ObservableObject
                 await ApplyProfileValuesAsync(monitor, profile, skipInputSource: true);
                 // Only suppress repeated foreground notifications after a complete apply.
                 // A partial failure must remain retryable the next time this app is activated.
-                if (AutomationStatus.StartsWith("已应用预设", StringComparison.Ordinal) ||
-                    AutomationStatus.StartsWith("预设部分应用：成功", StringComparison.Ordinal) &&
-                    AutomationStatus.EndsWith("失败 0 项。", StringComparison.Ordinal))
+                if (_automationStatus.StartsWith("已应用预设", StringComparison.Ordinal) ||
+                    _automationStatus.StartsWith("预设部分应用：成功", StringComparison.Ordinal) &&
+                    _automationStatus.EndsWith("失败 0 项。", StringComparison.Ordinal))
                     _lastAutomationKey = key;
-                DiagnosticLog.Write(AutomationStatus.EndsWith("失败 0 项。", StringComparison.Ordinal) || AutomationStatus.StartsWith("已应用预设", StringComparison.Ordinal) ? "INFO" : "WARN",
-                    "automation.foreground.apply.completed", $"executable={eventArgs.ExecutablePath}; source={(rule is null ? "default" : "application-rule")}; profile={profile.Name}; result={AutomationStatus}");
+                DiagnosticLog.Write(_automationStatus.EndsWith("失败 0 项。", StringComparison.Ordinal) || _automationStatus.StartsWith("已应用预设", StringComparison.Ordinal) ? "INFO" : "WARN",
+                    "automation.foreground.apply.completed", $"executable={eventArgs.ExecutablePath}; source={(rule is null ? "default" : "application-rule")}; profile={profile.Name}; result={_automationStatus}");
             }
             catch (Exception exception)
             {

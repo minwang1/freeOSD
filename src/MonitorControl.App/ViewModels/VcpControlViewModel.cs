@@ -12,6 +12,7 @@ namespace MonitorControl.App.ViewModels;
 public sealed class VcpControlViewModel : ObservableObject
 {
     private readonly ControlViewModel _owner;
+    private readonly string _name;
     private readonly bool _isContinuous;
     private CancellationTokenSource? _debounce;
     private double _value;
@@ -34,7 +35,7 @@ public sealed class VcpControlViewModel : ObservableObject
     {
         _owner = owner;
         Code = code;
-        Name = name;
+        _name = name;
         MonitorId = monitorId;
         _isContinuous = isContinuous;
         Maximum = isContinuous ? Math.Max(1u, maximum) : uint.MaxValue;
@@ -58,7 +59,8 @@ public sealed class VcpControlViewModel : ObservableObject
     }
 
     public byte Code { get; }
-    public string Name { get; }
+    public string Name => _name;
+    public string DisplayName => Localize(_name);
     public MonitorId MonitorId { get; }
     public bool IsReadable
     {
@@ -93,7 +95,7 @@ public sealed class VcpControlViewModel : ObservableObject
     public string ValueText => IsReadable ? Math.Round(Value).ToString("0") : "—";
     public string? ErrorText
     {
-        get => _errorText;
+        get => _errorText is null ? null : Localize(_errorText);
         internal set
         {
             if (!SetField(ref _errorText, value)) return;

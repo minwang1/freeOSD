@@ -29,9 +29,12 @@ public partial class App : Application
     private MainWindow? _mainWindow;
     private IClassicDesktopStyleApplicationLifetime? _desktop;
     private TrayIcon? _trayIcon;
+    private NativeMenuItem? _trayOpenItem;
+    private NativeMenuItem? _trayExitItem;
     private AppearanceSettingsStore _appearanceSettingsStore = null!;
     private AppearanceMode _appearanceMode;
     private AccentColor _accentColor;
+    private UiLanguage _language;
 
     public override void Initialize()
     {
@@ -42,6 +45,8 @@ public partial class App : Application
         var appearanceSettings = _appearanceSettingsStore.Load();
         _appearanceMode = appearanceSettings.Mode;
         _accentColor = appearanceSettings.Accent;
+        _language = appearanceSettings.Language;
+        LocalizationService.SetLanguage(_language);
     }
 
     public override void OnFrameworkInitializationCompleted()
@@ -62,11 +67,11 @@ public partial class App : Application
                     loginStartupService: new WindowsLoginStartupService(),
                     foregroundApplicationMonitor: new WindowsForegroundApplicationMonitor(),
                     installedApplicationCatalog: new WindowsInstalledApplicationCatalog(),
-                    displayColorProfileService: new WindowsDisplayColorProfileService()), _appearanceMode, _accentColor);
+                    displayColorProfileService: new WindowsDisplayColorProfileService()), _appearanceMode, _accentColor, _language);
             }
             else
             {
-                desktop.MainWindow = _mainWindow = new MainWindow(new ControlViewModel(new UnsupportedPlatformMonitorBackend()), _appearanceMode, _accentColor);
+                desktop.MainWindow = _mainWindow = new MainWindow(new ControlViewModel(new UnsupportedPlatformMonitorBackend()), _appearanceMode, _accentColor, _language);
             }
 
             InitializeTrayIcon();
@@ -99,6 +104,17 @@ public partial class App : Application
         app.SetAppearance(app._appearanceMode, accentColor);
     }
 
+    public static void SetLanguage(UiLanguage language)
+    {
+        var app = _current;
+        if (app is null || app._language == language) return;
+        app._language = language;
+        LocalizationService.SetLanguage(language);
+        app.SaveAppearanceSettings();
+        app._mainWindow?.UpdateLocalizedOptions(language);
+        app.UpdateTrayLanguage();
+    }
+
     private void SetAppearance(AppearanceMode mode, AccentColor accentColor)
     {
         if (_appearanceMode == mode && _accentColor == accentColor) return;
@@ -114,7 +130,12 @@ public partial class App : Application
 
         _appearanceMode = mode;
         _accentColor = accentColor;
-        try { _appearanceSettingsStore.Save(new AppearanceSettings(mode, accentColor)); }
+        SaveAppearanceSettings();
+    }
+
+    private void SaveAppearanceSettings()
+    {
+        try { _appearanceSettingsStore.Save(new AppearanceSettings(_appearanceMode, _accentColor, _language)); }
         catch (Exception exception)
         {
             DiagnosticLog.Write("WARN", "appearance.settings.save.failed", $"error={exception.Message}");
@@ -141,13 +162,13 @@ public partial class App : Application
         try
         {
             var menu = new NativeMenu();
-            var openItem = new NativeMenuItem("打开 Monitor Control");
-            openItem.Click += (_, _) => ShowMainWindow();
-            var exitItem = new NativeMenuItem("退出");
-            exitItem.Click += (_, _) => ExitApplication();
-            menu.Items.Add(openItem);
+            _trayOpenItem = new NativeMenuItem(LocalizationService.Translate("打开 Monitor Control"));
+            _trayOpenItem.Click += (_, _) => ShowMainWindow();
+            _trayExitItem = new NativeMenuItem(LocalizationService.Translate("退出"));
+            _trayExitItem.Click += (_, _) => ExitApplication();
+            menu.Items.Add(_trayOpenItem);
             menu.Items.Add(new NativeMenuItemSeparator());
-            menu.Items.Add(exitItem);
+            menu.Items.Add(_trayExitItem);
 
             _trayIcon = new TrayIcon
             {
@@ -165,6 +186,12 @@ public partial class App : Application
             _trayIcon = null;
             DiagnosticLog.Write("WARN", "tray.initialize.failed", $"error={exception.Message}");
         }
+    }
+
+    private void UpdateTrayLanguage()
+    {
+        if (_trayOpenItem is not null) _trayOpenItem.Header = LocalizationService.Translate("打开 Monitor Control");
+        if (_trayExitItem is not null) _trayExitItem.Header = LocalizationService.Translate("退出");
     }
 
     private void ShowMainWindow()
@@ -250,7 +277,7 @@ public partial class App : Application
     {
         private static BackendOperationException Unsupported() => new(
             BackendErrorKind.Unsupported,
-            "当前平台的 DDC/CI 后端尚未实现。Windows 版本目前提供显示器控制。");
+            LocalizationService.Translate("当前平台的 DDC/CI 后端尚未实现。Windows 版本目前提供显示器控制。"));
 
         public ValueTask<IReadOnlyList<MonitorDescriptor>> DiscoverMonitorsAsync(CancellationToken cancellationToken = default) =>
             ValueTask.FromException<IReadOnlyList<MonitorDescriptor>>(Unsupported());

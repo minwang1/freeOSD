@@ -7,9 +7,19 @@ using System.Windows.Input;
 
 namespace MonitorControl.App.ViewModels;
 
-public sealed record VcpValueOption(uint Value, string Label)
+public sealed class VcpValueOption : ObservableObject
 {
-    public override string ToString() => Label;
+    public VcpValueOption(uint value, string sourceLabel)
+    {
+        Value = value;
+        SourceLabel = sourceLabel;
+    }
+
+    public uint Value { get; }
+    public string SourceLabel { get; }
+    public string Label => SourceLabel;
+    public string LocalizedLabel => MonitorControl.App.Services.LocalizationService.Translate(SourceLabel);
+    public override string ToString() => LocalizedLabel;
 }
 
 public abstract class ObservableObject : INotifyPropertyChanged
@@ -26,6 +36,10 @@ public abstract class ObservableObject : INotifyPropertyChanged
 
     protected void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+    public void NotifyLocalizationChanged() => OnPropertyChanged(string.Empty);
+
+    protected static string Localize(string text) => MonitorControl.App.Services.LocalizationService.Translate(text);
 }
 
 public sealed class AsyncCommand : ICommand

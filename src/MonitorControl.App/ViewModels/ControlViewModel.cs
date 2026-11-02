@@ -165,7 +165,7 @@ public sealed partial class ControlViewModel : ObservableObject
             }
         }
     }
-    public string HdrStatus { get => _hdrStatus; private set => SetField(ref _hdrStatus, value); }
+    public string HdrStatus { get => Localize(_hdrStatus); private set => SetField(ref _hdrStatus, value); }
     public ObservableCollection<MonitorProfile> Profiles { get; } = [];
     public bool HasProfiles => Profiles.Count > 0;
     public bool HasNoProfiles => Profiles.Count == 0;
@@ -188,18 +188,18 @@ public sealed partial class ControlViewModel : ObservableObject
             _ = InspectSelectedDisplayColorProfileAsync(value);
         }
     }
-    public string DisplayColorProfileStatus { get => _displayColorProfileStatus; private set => SetField(ref _displayColorProfileStatus, value); }
-    public string DisplayColorProfileInspectionStatus { get => _displayColorProfileInspectionStatus; private set => SetField(ref _displayColorProfileInspectionStatus, value); }
-    public string DisplayColorPipelineStatus { get => _displayColorPipelineStatus; private set => SetField(ref _displayColorPipelineStatus, value); }
+    public string DisplayColorProfileStatus { get => Localize(_displayColorProfileStatus); private set => SetField(ref _displayColorProfileStatus, value); }
+    public string DisplayColorProfileInspectionStatus { get => Localize(_displayColorProfileInspectionStatus); private set => SetField(ref _displayColorProfileInspectionStatus, value); }
+    public string DisplayColorPipelineStatus { get => Localize(_displayColorPipelineStatus); private set => SetField(ref _displayColorPipelineStatus, value); }
     public int RedRgbGainPercent { get => _redRgbGainPercent; set { if (SetField(ref _redRgbGainPercent, value)) OnRgbGainChanged(); } }
     public int GreenRgbGainPercent { get => _greenRgbGainPercent; set { if (SetField(ref _greenRgbGainPercent, value)) OnRgbGainChanged(); } }
     public int BlueRgbGainPercent { get => _blueRgbGainPercent; set { if (SetField(ref _blueRgbGainPercent, value)) OnRgbGainChanged(); } }
-    public string RedRgbGainLabel => $"红色 {RedRgbGainPercent}%";
-    public string GreenRgbGainLabel => $"绿色 {GreenRgbGainPercent}%";
-    public string BlueRgbGainLabel => $"蓝色 {BlueRgbGainPercent}%";
-    public string RgbGainStatus { get => _rgbGainStatus; private set => SetField(ref _rgbGainStatus, value); }
+    public string RedRgbGainLabel => $"{Localize("红色")} {RedRgbGainPercent}%";
+    public string GreenRgbGainLabel => $"{Localize("绿色")} {GreenRgbGainPercent}%";
+    public string BlueRgbGainLabel => $"{Localize("蓝色")} {BlueRgbGainPercent}%";
+    public string RgbGainStatus { get => Localize(_rgbGainStatus); private set => SetField(ref _rgbGainStatus, value); }
     public bool IsRgbAdjustmentPending => !_hasKnownAppliedRgbGains || RedRgbGainPercent != _appliedRedRgbGainPercent || GreenRgbGainPercent != _appliedGreenRgbGainPercent || BlueRgbGainPercent != _appliedBlueRgbGainPercent;
-    public string RgbGainPendingStatus => !_hasKnownAppliedRgbGains ? "当前活动配置的 RGB 参数未知；应用后会保存本应用的参数。" : IsRgbAdjustmentPending ? "参数有更改，尚未应用。" : "参数与当前应用的 RGB 配置一致。";
+    public string RgbGainPendingStatus => Localize(!_hasKnownAppliedRgbGains ? "当前活动配置的 RGB 参数未知；应用后会保存本应用的参数。" : IsRgbAdjustmentPending ? "参数有更改，尚未应用。" : "参数与当前应用的 RGB 配置一致。");
     public ICommand ApplyRgbAdjustmentCommand { get; }
     public ICommand ResetRgbAdjustmentCommand { get; }
     private bool _hasOriginalDisplayColorProfile;
@@ -230,7 +230,7 @@ public sealed partial class ControlViewModel : ObservableObject
             if (!_isLoadingAutomationSettings) _ = SaveAutomationRulesAsync();
         }
     }
-    public string AutomationStatus { get => _automationStatus; private set => SetField(ref _automationStatus, value); }
+    public string AutomationStatus { get => Localize(_automationStatus); private set => SetField(ref _automationStatus, value); }
     public ApplicationProfileRule? SelectedAutomationRule { get => _selectedAutomationRule; set { if (SetField(ref _selectedAutomationRule, value) && RemoveAutomationRuleCommand is AsyncCommand command) command.RaiseCanExecuteChanged(); } }
     public MonitorProfile? DefaultAutomationProfile
     {
@@ -242,9 +242,9 @@ public sealed partial class ControlViewModel : ObservableObject
             OnPropertyChanged(nameof(DefaultAutomationProfileName));
         }
     }
-    public string DefaultAutomationProfileName => DefaultAutomationProfile?.Name ?? "不应用预设";
+    public string DefaultAutomationProfileName => DefaultAutomationProfile?.Name ?? Localize("不应用预设");
     public string ProfileName { get => _profileName; set { if (SetField(ref _profileName, value)) RaiseProfileCommands(); } }
-    public string ProfileStatus { get => _profileStatus; private set => SetField(ref _profileStatus, value); }
+    public string ProfileStatus { get => Localize(_profileStatus); private set => SetField(ref _profileStatus, value); }
     public bool IsProfilesTab
     {
         get => _isProfilesTab;
@@ -306,7 +306,7 @@ public sealed partial class ControlViewModel : ObservableObject
             _ = UpdateLoginStartupAsync(value);
         }
     }
-    public string LoginStartupStatus { get => _loginStartupStatus; private set => SetField(ref _loginStartupStatus, value); }
+    public string LoginStartupStatus { get => Localize(_loginStartupStatus); private set => SetField(ref _loginStartupStatus, value); }
 
     public MonitorProfile? SelectedProfile { get => _selectedProfile; set { if (SetField(ref _selectedProfile, value)) { RaiseProfileCommands(); RaiseAutomationCommands(); } } }
     public bool IsLoadingProfiles { get => _isLoadingProfiles; private set => SetField(ref _isLoadingProfiles, value); }
@@ -368,7 +368,7 @@ public sealed partial class ControlViewModel : ObservableObject
     }
     public string? ResolutionError
     {
-        get => _resolutionError;
+        get => _resolutionError is null ? null : Localize(_resolutionError);
         private set
         {
             if (!SetField(ref _resolutionError, value)) return;
@@ -378,12 +378,12 @@ public sealed partial class ControlViewModel : ObservableObject
     public bool HasResolutionError => !string.IsNullOrWhiteSpace(ResolutionError);
     public string ResolutionStatusText
     {
-        get => _resolutionStatusText;
+        get => Localize(_resolutionStatusText);
         private set => SetField(ref _resolutionStatusText, value);
     }
     public string? RefreshRateError
     {
-        get => _refreshRateError;
+        get => _refreshRateError is null ? null : Localize(_refreshRateError);
         private set
         {
             if (!SetField(ref _refreshRateError, value)) return;
@@ -393,7 +393,7 @@ public sealed partial class ControlViewModel : ObservableObject
     public bool HasRefreshRateError => !string.IsNullOrWhiteSpace(RefreshRateError);
     public string RefreshRateStatusText
     {
-        get => _refreshRateStatusText;
+        get => Localize(_refreshRateStatusText);
         private set => SetField(ref _refreshRateStatusText, value);
     }
     public bool HasRefreshRateRestoreFailure => _restoreFailureTrialId is not null;
@@ -539,14 +539,14 @@ public sealed partial class ControlViewModel : ObservableObject
         ContinuousControls.Where(control => control.Code is not (0x16 or 0x18 or 0x1A)).ToArray();
     public bool HasNoContinuousControls => HasMonitors && !IsLoading && ControlPanelContinuousControls.Count == 0;
     public bool HasInputSource => DiscreteControls.Any(control => control.Code == 0x60);
-    public string ConnectionStatus => IsLoading || IsScanning
+    public string ConnectionStatus => Localize(IsLoading || IsScanning
         ? "正在读取"
-        : SelectedMonitor is null ? "未连接" : "已连接";
+        : SelectedMonitor is null ? "未连接" : "已连接");
     public bool IsConnected => SelectedMonitor is not null && !IsLoading && !IsScanning;
 
     public string StatusText
     {
-        get => _statusText;
+        get => Localize(_statusText);
         private set => SetField(ref _statusText, value);
     }
 
