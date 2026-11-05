@@ -40,7 +40,7 @@ dotnet run --project .\tests\MonitorControl.Core.Tests\MonitorControl.Core.Tests
 dotnet run --project .\src\MonitorControl.App\MonitorControl.App.csproj
 ```
 
-GitHub Actions 工作流为 Windows x64 发布两种版本：`freeOSD-win-x64-native-aot` 是自包含原生程序，目标机器无需安装 .NET Runtime；`freeOSD-win-x64-framework-dependent` 不附带 .NET Runtime，运行前需安装 .NET 10 Runtime。工作流在 push、pull request 和手动触发时运行；artifact 保留 14 天。
+GitHub Actions 工作流为 Windows x64 发布两种版本，artifact 不包含 `.pdb` 调试符号：`freeOSD-win-x64-native-aot` 是自包含原生程序，目标机器无需安装 .NET Runtime；`freeOSD-win-x64-framework-dependent` 不附带 .NET Runtime，运行前需安装 .NET 10 Runtime。工作流在 push、pull request 和手动触发时运行；artifact 保留 14 天。
 
 最近一次构建结果：0 警告、0 错误。Core 契约检查为 5/5 通过。检查项目目前是无第三方测试依赖的 C# 控制台检查器，不应使用 `dotnet test` 作为其运行命令。Windows 主窗口启动和能力读取已实机运行验证，但未尝试写入控制值；Linux 构建和运行尚未验证。
 
