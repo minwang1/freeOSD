@@ -10,7 +10,7 @@ namespace MonitorControl.App.Services;
 
 public sealed class AutomationRuleStore
 {
-    private const int CurrentSchemaVersion = 3;
+    private const int CurrentSchemaVersion = 4;
     private readonly string _path;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
@@ -31,9 +31,11 @@ public sealed class AutomationRuleStore
                 return new ApplicationAutomationSettings(document.Rules ?? [], null, false);
             if (document.SchemaVersion == 2)
                 return new ApplicationAutomationSettings(document.Rules ?? [], document.DefaultProfileName, false);
+            if (document.SchemaVersion == 3)
+                return new ApplicationAutomationSettings(document.Rules ?? [], document.DefaultProfileName, document.IsEnabled);
             if (document.SchemaVersion != CurrentSchemaVersion)
                 throw new InvalidDataException($"Unsupported automation rule schema version {document.SchemaVersion}.");
-            return new ApplicationAutomationSettings(document.Rules ?? [], document.DefaultProfileName, document.IsEnabled);
+            return new ApplicationAutomationSettings(document.Rules ?? [], document.DefaultProfileName, document.IsEnabled, document.ApplyDisplayModeAutomatically);
         }
         finally { _gate.Release(); }
     }
@@ -47,7 +49,7 @@ public sealed class AutomationRuleStore
             var temporaryPath = _path + ".tmp";
             await using (var stream = new FileStream(temporaryPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, true))
             {
-                await JsonSerializer.SerializeAsync(stream, new RuleDocument(CurrentSchemaVersion, settings.Rules, settings.DefaultProfileName, settings.IsEnabled), cancellationToken: cancellationToken).ConfigureAwait(false);
+                await JsonSerializer.SerializeAsync(stream, new RuleDocument(CurrentSchemaVersion, settings.Rules, settings.DefaultProfileName, settings.IsEnabled, settings.ApplyDisplayModeAutomatically), cancellationToken: cancellationToken).ConfigureAwait(false);
                 await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
             File.Move(temporaryPath, _path, overwrite: true);
@@ -55,5 +57,5 @@ public sealed class AutomationRuleStore
         finally { _gate.Release(); }
     }
 
-    private sealed record RuleDocument(int SchemaVersion, IReadOnlyList<ApplicationProfileRule>? Rules, string? DefaultProfileName = null, bool IsEnabled = false);
+    private sealed record RuleDocument(int SchemaVersion, IReadOnlyList<ApplicationProfileRule>? Rules, string? DefaultProfileName = null, bool IsEnabled = false, bool ApplyDisplayModeAutomatically = false);
 }

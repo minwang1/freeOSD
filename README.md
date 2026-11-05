@@ -6,7 +6,7 @@ freeOSD is a desktop monitor-control application built with **C#, .NET 10, and A
 
 ## Why freeOSD
 
-freeOSD is being developed for people whose mid-range or entry-level monitors lack useful manufacturer control software, and for people who want different monitor settings applied quickly for different apps. For example, on a monitor that supports both 4K and 1080p, the intended experience is to switch to 1080p at a high refresh rate when an FPS game opens, then return to 4K at a lower refresh rate on the desktop. This is a project goal, not a current automatic feature: app rules can apply supported monitor presets, but they do not yet switch resolution or refresh rate. Those display modes can currently be changed manually.
+freeOSD is being developed for people whose mid-range or entry-level monitors lack useful manufacturer control software, and for people who want different monitor settings applied quickly for different apps. Configure per-app display profiles in **Profiles & Automation**. For example, on a monitor that supports both 4K and 1080p, save an FPS profile at 1080p with a high refresh rate and a desktop profile at 4K with a lower refresh rate, then bind each profile to its app. Enable **Automatically apply resolution and refresh rate from presets** to switch display modes with the foreground app. This opt-in is off by default; each mode change has a 15-second automatic rollback and is confirmed after the app reads back the requested mode.
 
 ![freeOSD main window](docs/pic/Screenshot-main.png)
 
@@ -14,7 +14,7 @@ freeOSD is being developed for people whose mid-range or entry-level monitors la
 
 - **Monitor controls:** Discover available monitors and show brightness, contrast, color-preset, and input-source controls according to each device's reported capabilities. Input-source changes require confirmation.
 - **Windows display settings:** Query and change HDR, resolution, and refresh rate. Resolution and refresh rate are separate operations. A mode change starts a 15-second trial; keep the change to confirm it, or let the app attempt to restore the previous mode when the trial expires.
-- **Profiles and automation:** Save and apply monitor presets. Switch presets based on the foreground application and choose a default preset for applications without a matching rule. Automatic application verifies each setting and skips input-source changes.
+- **Profiles and automation:** Save and apply monitor presets, including the current resolution and refresh rate. Switch presets based on the foreground application, choose a default preset, and optionally apply saved display modes automatically. Each automatic mode change has a 15-second rollback window and must pass readback verification. Automatic application skips input-source changes.
 - **Color management:** Import, apply, and restore ICC/ICM profiles. SDR RGB calibration creates a separate ICC profile with VCGT data. SDR VCGT calibration is not applied while HDR is enabled.
 - **Appearance and tray:** Chinese and English UI, system/light/dark themes, accent colors, Windows sign-in startup, and a system-tray icon.
 

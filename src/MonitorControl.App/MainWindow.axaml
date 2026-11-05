@@ -271,6 +271,11 @@
                                     </arc:Combobox.ItemTemplate>
                                 </arc:Combobox>
                             </Grid>
+                            <arc:Switch Content="{loc:Loc '自动应用预设中的分辨率和刷新率（需先启用前台应用切换）'}"
+                                        IsChecked="{Binding IsDisplayModeAutomationEnabled, Mode=TwoWay}"
+                                        IsEnabled="{Binding CanAutomateDisplayModeChanges}" VerticalAlignment="Center" />
+                            <TextBlock Text="{loc:Loc '启用后，应用规则会在切换预设时切换到保存的显示模式；每次切换仍有 15 秒自动回滚，并在读回成功后自动确认。此选项默认关闭。'}"
+                                       Foreground="{arc:ArcDesignTokenResource TextSecondary}" TextWrapping="Wrap" />
                             <TextBlock Text="{loc:Loc '添加规则时可搜索已安装程序，或使用上一个前台程序。程序规则优先匹配；未命中时应用默认预设。删除预设会同步移除关联规则，自动应用会跳过输入源设置。'}"
                                        Foreground="{arc:ArcDesignTokenResource TextSecondary}" TextWrapping="Wrap" />
                             <TextBlock Text="{loc:Loc '还没有已保存的预设。请先在上方保存预设，再创建应用规则。'}"

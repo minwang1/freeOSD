@@ -26,7 +26,21 @@ public sealed record MonitorProfile(
     int? RefreshRateHz = null,
     bool? HdrEnabled = null,
     RgbGainAdjustment? RgbGainAdjustment = null,
-    string? ColorProfilePath = null);
+    string? ColorProfilePath = null,
+    DisplayModePreference? DisplayMode = null);
+
+/// <summary>
+/// Portable display-mode preference captured from the active mode. Platform-specific
+/// mode identifiers are resolved again from the target monitor's current capabilities.
+/// </summary>
+public sealed record DisplayModePreference(
+    int Width,
+    int Height,
+    uint BitsPerPixel,
+    uint RefreshRateNumerator,
+    uint RefreshRateDenominator,
+    int ScanLineOrdering,
+    int Orientation);
 
 /// <summary>Capture-time omissions are diagnostics and are not persisted as profile data.</summary>
 public sealed record ProfileCaptureResult(
@@ -41,4 +55,5 @@ public sealed record InstalledApplication(string DisplayName, string ExecutableP
 public sealed record ApplicationAutomationSettings(
     IReadOnlyList<ApplicationProfileRule> Rules,
     string? DefaultProfileName,
-    bool IsEnabled = false);
+    bool IsEnabled = false,
+    bool ApplyDisplayModeAutomatically = false);

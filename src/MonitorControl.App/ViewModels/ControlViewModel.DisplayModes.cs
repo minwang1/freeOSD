@@ -110,14 +110,15 @@ public sealed partial class ControlViewModel : ObservableObject
             (isResolution ? !CanSetResolution : !CanSetRefreshRate) || mode.IsCurrent)
             return;
 
-        SetDisplayModeError(isResolution, null);
-        SetDisplayModeStatus(isResolution, isResolution
-            ? $"正在切换到 {DescribeResolution(mode)}（保持当前刷新率）…"
-            : $"正在切换到 {DescribeRefreshRate(mode)}…");
+        await _displayModeApplyGate.WaitAsync();
         var changeKindForLog = isResolution ? DisplayModeChangeKind.Resolution : DisplayModeChangeKind.RefreshRate;
-        DiagnosticLog.Write("INFO", "display.mode.apply.started", $"kind={changeKindForLog} modeId={mode.ModeId} width={mode.Width} height={mode.Height} refreshHz={mode.RefreshRateHz}");
         try
         {
+            SetDisplayModeError(isResolution, null);
+            SetDisplayModeStatus(isResolution, isResolution
+                ? $"正在切换到 {DescribeResolution(mode)}（保持当前刷新率）…"
+                : $"正在切换到 {DescribeRefreshRate(mode)}…");
+            DiagnosticLog.Write("INFO", "display.mode.apply.started", $"kind={changeKindForLog} modeId={mode.ModeId} width={mode.Width} height={mode.Height} refreshHz={mode.RefreshRateHz}");
             var changeKind = changeKindForLog;
             var trial = await _refreshRateTrialCoordinator.StartTrialAsync(
                 monitor.Id, mode, TimeSpan.FromSeconds(15), changeKind);
@@ -172,6 +173,7 @@ public sealed partial class ControlViewModel : ObservableObject
             _activeRefreshRateTrialId = null;
             OnPropertyChanged(nameof(HasRefreshRateRestoreFailure));
             RaiseRefreshRateCommandState();
+            _displayModeApplyGate.Release();
         }
     }
 
@@ -232,12 +234,14 @@ public sealed partial class ControlViewModel : ObservableObject
     private bool CanApplyRefreshRate() => CanSetRefreshRate &&
         SelectedRefreshRateMode is { IsCurrent: false } &&
         _refreshRateTrialCoordinator is not null &&
+        _restoreFailureTrialId is null &&
         _activeRefreshRateTrialId is null &&
         !IsLoadingRefreshRates;
 
     private bool CanApplyResolution() => CanSetResolution &&
         SelectedResolutionMode is { IsCurrent: false } &&
         _refreshRateTrialCoordinator is not null &&
+        _restoreFailureTrialId is null &&
         _activeRefreshRateTrialId is null &&
         !IsLoadingRefreshRates;
 
@@ -250,6 +254,8 @@ public sealed partial class ControlViewModel : ObservableObject
 
     private void ClearRefreshRateModes()
     {
+        _availableDisplayModesMonitorId = null;
+        _availableDisplayModes = [];
         IsLoadingRefreshRates = false;
         RefreshRateModes.Clear();
         ResolutionModes.Clear();

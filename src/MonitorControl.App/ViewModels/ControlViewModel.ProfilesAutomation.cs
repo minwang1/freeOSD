@@ -47,6 +47,12 @@ public sealed partial class ControlViewModel : ObservableObject
             if (control.TryGetConfirmedValue(out var value)) values[control.Code] = value;
         try
         {
+            var activeMode = string.Equals(_availableDisplayModesMonitorId, monitor.Id.Value, StringComparison.OrdinalIgnoreCase)
+                ? _availableDisplayModes.FirstOrDefault(mode => mode.IsCurrent)
+                : null;
+            DisplayModePreference? displayModePreference = activeMode is null ? null : new DisplayModePreference(
+                activeMode.Width, activeMode.Height, activeMode.BitsPerPixel, activeMode.RefreshRateNumerator,
+                activeMode.RefreshRateDenominator, activeMode.ScanLineOrdering, activeMode.Orientation);
             RgbGainAdjustment? rgb = null;
             string? colorProfilePath = null;
             if (_displayColorProfileService?.IsSupported == true && GetSelectedDisplayName(monitor) is { } displayName)
@@ -71,7 +77,7 @@ public sealed partial class ControlViewModel : ObservableObject
             {
                 rgb = new RgbGainAdjustment(_appliedRedRgbGainPercent, _appliedGreenRgbGainPercent, _appliedBlueRgbGainPercent);
             }
-            if (values.Count == 0 && rgb is null && colorProfilePath is null)
+            if (values.Count == 0 && rgb is null && colorProfilePath is null && displayModePreference is null)
             {
                 ProfileStatus = "没有可保存的已确认控件值或当前活动 ICC/RGB 设置。";
                 return;
@@ -79,14 +85,15 @@ public sealed partial class ControlViewModel : ObservableObject
 
             var profile = new MonitorProfile(ProfileStore.CurrentSchemaVersion, ProfileName.Trim(), DateTimeOffset.UtcNow,
                 monitor.Id.Value, values, new Dictionary<string, IdentifiedControlMetadata>(),
-                RgbGainAdjustment: rgb, ColorProfilePath: colorProfilePath);
+                RgbGainAdjustment: rgb, ColorProfilePath: colorProfilePath, DisplayMode: displayModePreference);
             await _profileStore.SaveAsync(profile);
             ProfileName = "";
             await LoadProfilesAsync();
             SelectedProfile = Profiles.FirstOrDefault(item => string.Equals(item.Name, profile.Name, StringComparison.OrdinalIgnoreCase));
             ProfileStatus = $"已保存预设“{profile.Name}”，包含 {values.Count} 项 VCP 控件" +
                 (profile.RgbGainAdjustment is { } savedRgb ? $"及 RGB（{savedRgb.RedPercent}/{savedRgb.GreenPercent}/{savedRgb.BluePercent}%）" : "") +
-                (profile.ColorProfilePath is { } savedColorPath ? $"及 ICC（{Path.GetFileName(savedColorPath)}）" : "") + ".";
+                (profile.ColorProfilePath is { } savedColorPath ? $"及 ICC（{Path.GetFileName(savedColorPath)}）" : "") +
+                (displayModePreference is { } savedMode ? $"及显示模式（{savedMode.Width}×{savedMode.Height} @ {savedMode.RefreshRateNumerator / (double)savedMode.RefreshRateDenominator:0.##} Hz）" : "") + ".";
         }
         catch (Exception exception) { ProfileStatus = $"保存预设失败：{exception.Message}"; }
     }
@@ -123,6 +130,19 @@ public sealed partial class ControlViewModel : ObservableObject
         var controls = ContinuousControls.Concat(DiscreteControls).ToDictionary(control => control.Code);
         var issues = new List<string>();
         var applied = 0;
+        if (profile.DisplayMode is { } displayMode)
+        {
+            if (!string.Equals(profile.MonitorIdentity, monitor.Id.Value, StringComparison.OrdinalIgnoreCase))
+                issues.Add("显示模式预设属于另一台显示器，已跳过以避免误应用。");
+            else if (skipInputSource && !IsDisplayModeAutomationEnabled)
+                DiagnosticLog.Write("INFO", "profile.display-mode.apply.skipped", $"profile={profile.Name}; reason=automatic-display-mode-switching-disabled");
+            else
+            {
+                var modeResult = await ApplyProfileDisplayModeAsync(monitor, displayMode, autoConfirm: skipInputSource);
+                if (modeResult is null) applied++;
+                else issues.Add($"显示模式：{modeResult}");
+            }
+        }
         foreach (var entry in profile.VcpValues.OrderBy(pair => pair.Key))
         {
             if (skipInputSource && entry.Key == 0x60)
@@ -261,6 +281,9 @@ public sealed partial class ControlViewModel : ObservableObject
             DefaultAutomationProfile = Profiles.FirstOrDefault(item => string.Equals(item.Name, settings.DefaultProfileName, StringComparison.OrdinalIgnoreCase));
             _isAutomationEnabled = settings.IsEnabled && IsAutomationSupported;
             OnPropertyChanged(nameof(IsAutomationEnabled));
+            _isDisplayModeAutomationEnabled = settings.ApplyDisplayModeAutomatically && IsAutomationSupported;
+            OnPropertyChanged(nameof(IsDisplayModeAutomationEnabled));
+            OnPropertyChanged(nameof(CanAutomateDisplayModeChanges));
             AutomationStatus = IsAutomationSupported
                 ? $"已加载 {AutomationRules.Count} 条应用规则。自动切换{(_isAutomationEnabled ? "已启用" : "已关闭")}。"
                 : "此平台暂不支持前台应用监控。";
@@ -302,7 +325,7 @@ public sealed partial class ControlViewModel : ObservableObject
     private async Task SaveAutomationRulesAsync()
     {
         if (_isLoadingAutomationSettings) return;
-        try { await _automationRuleStore.SaveAsync(new ApplicationAutomationSettings(AutomationRules.ToArray(), DefaultAutomationProfile?.Name, IsAutomationEnabled)); }
+        try { await _automationRuleStore.SaveAsync(new ApplicationAutomationSettings(AutomationRules.ToArray(), DefaultAutomationProfile?.Name, IsAutomationEnabled, IsDisplayModeAutomationEnabled)); }
         catch (Exception exception) { AutomationStatus = $"保存自动化规则失败：{exception.Message}"; }
     }
 
@@ -343,6 +366,9 @@ public sealed partial class ControlViewModel : ObservableObject
     {
         Dispatcher.UIThread.Post(async () =>
         {
+            await _automationApplyGate.WaitAsync();
+            try
+            {
             if (!IsAutomationEnabled) return;
             var rule = AutomationRules.FirstOrDefault(candidate => candidate.IsEnabled &&
                 string.Equals(candidate.ExecutablePath, eventArgs.ExecutablePath, StringComparison.OrdinalIgnoreCase));
@@ -373,6 +399,10 @@ public sealed partial class ControlViewModel : ObservableObject
                 DiagnosticLog.Write("INFO", "automation.foreground.apply-skipped", $"executable={eventArgs.ExecutablePath}; source={(rule is null ? "default" : "application-rule")}; profile={profile.Name}; reason=selection-unchanged");
                 return;
             }
+            // A different target is about to change monitor state. Invalidate the prior
+            // success before starting so a partial failure cannot leave a stale key that
+            // causes a later return to that prior preset to be skipped.
+            _lastAutomationKey = null;
             AutomationStatus = $"检测到 {Path.GetFileName(eventArgs.ExecutablePath)}，正在应用“{profile.Name}”…";
             try
             {
@@ -391,7 +421,87 @@ public sealed partial class ControlViewModel : ObservableObject
                 AutomationStatus = $"自动应用预设“{profile.Name}”失败：{exception.Message}";
                 DiagnosticLog.Write("ERROR", "automation.profile.apply.failed", $"profile={profile.Name}; monitor={monitor.Id.Value}; error={exception}");
             }
+            }
+            finally { _automationApplyGate.Release(); }
         });
+    }
+
+    private async Task<string?> ApplyProfileDisplayModeAsync(MonitorDescriptor monitor, DisplayModePreference preference, bool autoConfirm)
+    {
+        if (_displaySettingsBackend is null || _refreshRateTrialCoordinator is null || !CanSetResolution || !CanSetRefreshRate)
+            return "当前平台不支持自动设置分辨率和刷新率。";
+        await _displayModeApplyGate.WaitAsync();
+        if (_activeRefreshRateTrialId is not null)
+        {
+            _displayModeApplyGate.Release();
+            return "已有显示模式试用正在进行，请完成或等待回滚后再应用预设。";
+        }
+        if (_restoreFailureTrialId is not null)
+        {
+            _displayModeApplyGate.Release();
+            return "原显示模式尚未恢复，请先在控制页重试恢复。";
+        }
+        try
+        {
+            var supportedModes = await _displaySettingsBackend.GetAvailableModesAsync(monitor.Id);
+            var currentMode = supportedModes.FirstOrDefault(mode => mode.IsCurrent);
+            var target = supportedModes.FirstOrDefault(mode => mode.Width == preference.Width && mode.Height == preference.Height &&
+                mode.BitsPerPixel == preference.BitsPerPixel && mode.RefreshRateNumerator == preference.RefreshRateNumerator &&
+                mode.RefreshRateDenominator == preference.RefreshRateDenominator && mode.ScanLineOrdering == preference.ScanLineOrdering &&
+                mode.Orientation == preference.Orientation);
+            if (target is null) return $"当前显示器不支持 {preference.Width}×{preference.Height} @ {preference.RefreshRateNumerator / (double)preference.RefreshRateDenominator:0.##} Hz。";
+            if (target.IsCurrent) return null;
+
+            var changeKind = currentMode is null || target.Width != currentMode.Width || target.Height != currentMode.Height
+                ? DisplayModeChangeKind.Resolution
+                : DisplayModeChangeKind.RefreshRate;
+            var trial = await _refreshRateTrialCoordinator.StartTrialAsync(monitor.Id, target, TimeSpan.FromSeconds(15), changeKind);
+            _activeRefreshRateTrialId = trial.Trial.TrialId;
+            RaiseRefreshRateCommandState();
+            RefreshRateTrialState result;
+            if (autoConfirm)
+            {
+                var readbackModes = await _displaySettingsBackend.GetAvailableModesAsync(monitor.Id);
+                var targetIsActive = readbackModes.Any(mode => mode.IsCurrent && mode.Width == preference.Width && mode.Height == preference.Height &&
+                    mode.BitsPerPixel == preference.BitsPerPixel && mode.RefreshRateNumerator == preference.RefreshRateNumerator &&
+                    mode.RefreshRateDenominator == preference.RefreshRateDenominator && mode.ScanLineOrdering == preference.ScanLineOrdering &&
+                    mode.Orientation == preference.Orientation);
+                result = targetIsActive
+                    ? await _refreshRateTrialCoordinator.ConfirmAsync(trial.Trial.TrialId)
+                    : await _refreshRateTrialCoordinator.CancelAsync(trial.Trial.TrialId);
+            }
+            else
+            {
+                var keep = ConfirmDisplayModeTrialAsync is not null && await ConfirmDisplayModeTrialAsync(trial);
+                result = keep
+                    ? await _refreshRateTrialCoordinator.ConfirmAsync(trial.Trial.TrialId)
+                    : await _refreshRateTrialCoordinator.CancelAsync(trial.Trial.TrialId);
+            }
+
+            if (result.Status == RefreshRateTrialStatus.RestoreFailed)
+            {
+                _restoreFailureTrialId = result.Trial.TrialId;
+                OnPropertyChanged(nameof(HasRefreshRateRestoreFailure));
+                return result.LastError ?? "恢复原显示模式失败，可在控制页重试恢复。";
+            }
+            if (autoConfirm && result.Status == RefreshRateTrialStatus.Restored)
+                return "模式切换后读回不匹配，已恢复原模式。";
+            if (!autoConfirm && result.Status == RefreshRateTrialStatus.Restored)
+                return "已取消显示模式更改，恢复原模式。";
+            if (result.Status != RefreshRateTrialStatus.Confirmed) return "显示模式试用未能确认，已恢复原模式。";
+            await ReloadCurrentDisplayModesAsync(monitor);
+            return null;
+        }
+        catch (Exception exception)
+        {
+            return exception.Message;
+        }
+        finally
+        {
+            _activeRefreshRateTrialId = null;
+            RaiseRefreshRateCommandState();
+            _displayModeApplyGate.Release();
+        }
     }
 
     private void RaiseProfileCommands()

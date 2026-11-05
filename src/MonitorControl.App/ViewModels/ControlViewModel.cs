@@ -31,6 +31,8 @@ public sealed partial class ControlViewModel : ObservableObject
     private readonly IForegroundApplicationMonitor? _foregroundApplicationMonitor;
     private readonly AutomationRuleStore _automationRuleStore;
     private readonly SemaphoreSlim _deviceGate = new(1, 1);
+    private readonly SemaphoreSlim _automationApplyGate = new(1, 1);
+    private readonly SemaphoreSlim _displayModeApplyGate = new(1, 1);
     private MonitorDescriptor? _selectedMonitor;
     private bool _isLoading;
     private bool _isScanning;
@@ -65,6 +67,7 @@ public sealed partial class ControlViewModel : ObservableObject
     private MonitorProfile? _selectedProfile;
     private bool _isLoadingProfiles;
     private bool _isAutomationEnabled;
+    private bool _isDisplayModeAutomationEnabled;
     private string _automationStatus = "";
     private ApplicationProfileRule? _selectedAutomationRule;
     private MonitorProfile? _defaultAutomationProfile;
@@ -84,6 +87,7 @@ public sealed partial class ControlViewModel : ObservableObject
     private DisplayMode? _selectedRefreshRateMode;
     private DisplayMode? _selectedResolutionMode;
     private IReadOnlyList<DisplayMode> _availableDisplayModes = [];
+    private string? _availableDisplayModesMonitorId;
     private bool _updatingModeSelection;
     private string? _activeRefreshRateTrialId;
     private string? _restoreFailureTrialId;
@@ -226,10 +230,22 @@ public sealed partial class ControlViewModel : ObservableObject
         set
         {
             if (!SetField(ref _isAutomationEnabled, value)) return;
+            OnPropertyChanged(nameof(CanAutomateDisplayModeChanges));
             _ = SetAutomationEnabledAsync(value);
             if (!_isLoadingAutomationSettings) _ = SaveAutomationRulesAsync();
         }
     }
+    public bool IsDisplayModeAutomationEnabled
+    {
+        get => _isDisplayModeAutomationEnabled;
+        set
+        {
+            if (!SetField(ref _isDisplayModeAutomationEnabled, value)) return;
+            if (!_isLoadingAutomationSettings) _ = SaveAutomationRulesAsync();
+        }
+    }
+    public bool CanAutomateDisplayModeChanges => IsAutomationEnabled && SelectedMonitor is not null &&
+        _displaySettingsBackend is not null && _refreshRateTrialCoordinator is not null && CanSetResolution && CanSetRefreshRate;
     public string AutomationStatus { get => Localize(_automationStatus); private set => SetField(ref _automationStatus, value); }
     public ApplicationProfileRule? SelectedAutomationRule { get => _selectedAutomationRule; set { if (SetField(ref _selectedAutomationRule, value) && RemoveAutomationRuleCommand is AsyncCommand command) command.RaiseCanExecuteChanged(); } }
     public MonitorProfile? DefaultAutomationProfile
@@ -336,6 +352,7 @@ public sealed partial class ControlViewModel : ObservableObject
         {
             if (!SetField(ref _canSetRefreshRate, value)) return;
             RaiseRefreshRateCommandState();
+            OnPropertyChanged(nameof(CanAutomateDisplayModeChanges));
         }
     }
     public DisplayMode? SelectedRefreshRateMode
@@ -364,6 +381,7 @@ public sealed partial class ControlViewModel : ObservableObject
         {
             if (!SetField(ref _canSetResolution, value)) return;
             RaiseRefreshRateCommandState();
+            OnPropertyChanged(nameof(CanAutomateDisplayModeChanges));
         }
     }
     public string? ResolutionError
@@ -466,6 +484,7 @@ public sealed partial class ControlViewModel : ObservableObject
             if (!SetField(ref _selectedMonitor, value)) return;
             RaiseSelectionProperties();
             RaiseProfileCommands();
+            OnPropertyChanged(nameof(CanAutomateDisplayModeChanges));
             if (ApplyRgbAdjustmentCommand is AsyncCommand rgbCommand) rgbCommand.RaiseCanExecuteChanged();
             var nextDisplayName = GetSelectedDisplayName(value);
             if (!string.Equals(previousDisplayName, nextDisplayName, StringComparison.OrdinalIgnoreCase))
@@ -818,6 +837,7 @@ public sealed partial class ControlViewModel : ObservableObject
 
             var allModes = uniqueModes.ToArray();
             _availableDisplayModes = allModes;
+            _availableDisplayModesMonitorId = monitor.Id.Value;
             foreach (var mode in allModes
                          .GroupBy(mode => (mode.Width, mode.Height, mode.BitsPerPixel))
                          .Select(group => group.OrderByDescending(mode => mode.IsCurrent).First())
