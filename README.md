@@ -40,6 +40,8 @@ dotnet run --project .\tests\MonitorControl.Core.Tests\MonitorControl.Core.Tests
 dotnet run --project .\src\MonitorControl.App\MonitorControl.App.csproj
 ```
 
+GitHub Actions 中的 **Windows Native AOT** 工作流会为 Windows x64 发布自包含原生程序，并上传 `freeOSD-win-x64-native-aot` artifact。下载并解压后运行 `freeOSD.exe`，目标机器无需单独安装 .NET Runtime。工作流在 push、pull request 和手动触发时运行；artifact 保留 14 天。
+
 最近一次构建结果：0 警告、0 错误。Core 契约检查为 5/5 通过。检查项目目前是无第三方测试依赖的 C# 控制台检查器，不应使用 `dotnet test` 作为其运行命令。Windows 主窗口启动和能力读取已实机运行验证，但未尝试写入控制值；Linux 构建和运行尚未验证。
 
 DDC/CI 实机功能需要支持 DDC/CI 的显示器和连接链路，并在显示器 OSD 中启用 DDC/CI。显示器写入会立即生效；输入源切换会先要求确认。
