@@ -9,7 +9,7 @@
         mc:Ignorable="d" d:DesignWidth="1100" d:DesignHeight="720"
         x:Class="MonitorControl.App.MainWindow"
         x:DataType="vm:ControlViewModel"
-        Title="Monitor Control"
+        Title="freeOSD"
         Width="1100" Height="720" MinWidth="900" MinHeight="600">
     <Window.Styles>
         <Style Selector="arc|Button">
@@ -41,7 +41,7 @@
         <Border Grid.Row="0" Background="{arc:ArcDesignTokenResource Surface}" Padding="20,14" BorderBrush="{arc:ArcDesignTokenResource BorderSubtle}" BorderThickness="0,0,0,1"
                 IsEnabled="{Binding IsUiInteractionEnabled}">
             <Grid ColumnDefinitions="*,Auto,Auto,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="14" RowSpacing="4">
-                <TextBlock Grid.RowSpan="2" Text="Monitor Control" FontSize="{arc:ArcDesignTokenResource TypeXL}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <TextBlock Grid.RowSpan="2" Text="freeOSD" FontSize="{arc:ArcDesignTokenResource TypeXL}" FontWeight="SemiBold" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="1" Text="{loc:Loc Header.Monitor}" Foreground="{arc:ArcDesignTokenResource TextSecondary}" FontSize="{arc:ArcDesignTokenResource TypeXS}" />
                 <arc:Combobox Grid.Row="1" Grid.Column="1" MinWidth="240" Classes="field-picker"
                           ItemsSource="{Binding Monitors}"

@@ -162,7 +162,7 @@ public partial class App : Application
         try
         {
             var menu = new NativeMenu();
-            _trayOpenItem = new NativeMenuItem(LocalizationService.Translate("打开 Monitor Control"));
+            _trayOpenItem = new NativeMenuItem(LocalizationService.Translate("打开 freeOSD"));
             _trayOpenItem.Click += (_, _) => ShowMainWindow();
             _trayExitItem = new NativeMenuItem(LocalizationService.Translate("退出"));
             _trayExitItem.Click += (_, _) => ExitApplication();
@@ -172,8 +172,8 @@ public partial class App : Application
 
             _trayIcon = new TrayIcon
             {
-                Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://MonitorControl.App/Assets/monitor-control.ico"))),
-                ToolTipText = "Monitor Control",
+                Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://freeOSD/Assets/freeosd-logo.ico"))),
+                ToolTipText = "freeOSD",
                 Menu = menu
             };
             _trayIcon.Clicked += (_, _) => ShowMainWindow();
@@ -190,7 +190,7 @@ public partial class App : Application
 
     private void UpdateTrayLanguage()
     {
-        if (_trayOpenItem is not null) _trayOpenItem.Header = LocalizationService.Translate("打开 Monitor Control");
+        if (_trayOpenItem is not null) _trayOpenItem.Header = LocalizationService.Translate("打开 freeOSD");
         if (_trayExitItem is not null) _trayExitItem.Header = LocalizationService.Translate("退出");
     }
 

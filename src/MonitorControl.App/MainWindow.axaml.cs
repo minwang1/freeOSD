@@ -9,6 +9,7 @@ using Avalonia.Threading;
 using Avalonia.Controls.Templates;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform;
 using Avalonia.Platform.Storage;
 using MonitorControl.Core.Services;
 using MonitorControl.Core.Models;
@@ -55,6 +56,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://freeOSD/Assets/freeosd-logo.ico")));
         ConfigureArcPickerTextSelectors();
     }
 
@@ -65,6 +67,7 @@ public partial class MainWindow : Window
         UiLanguage language = UiLanguage.Chinese)
     {
         InitializeComponent();
+        Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://freeOSD/Assets/freeosd-logo.ico")));
         ConfigureArcPickerTextSelectors();
         _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
         _viewModel.ConfirmInputSourceAsync = ConfirmInputSourceAsync;
@@ -390,7 +393,12 @@ public partial class MainWindow : Window
         {
             Content = T("使用上一个前台程序"),
             Variant = TKCode.Arc.ButtonVariant.Secondary,
-            Size = TKCode.Arc.ControlSize.Small,
+            Size = TKCode.Arc.ControlSize.Medium,
+            Background = Brushes.Black,
+            Foreground = Brushes.White,
+            VerticalContentAlignment = Avalonia.Layout.VerticalAlignment.Center,
+            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Bottom,
+            Classes = { "field-action" },
             Margin = new Avalonia.Thickness(6, 4, 12, 8)
         };
         var selectedApplicationText = new TextBlock

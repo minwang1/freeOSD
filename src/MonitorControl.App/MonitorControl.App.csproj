@@ -1,13 +1,18 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
+    <AssemblyName>freeOSD</AssemblyName>
+    <Product>freeOSD</Product>
+    <ApplicationTitle>freeOSD</ApplicationTitle>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\..\assets\freeosd-logo.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
-    <AvaloniaResource Include="Assets\monitor-control.ico" />
+    <AvaloniaResource Include="..\..\assets\freeosd-logo.ico" Link="Assets\freeosd-logo.ico" />
+    <AvaloniaResource Include="..\..\assets\freeosd-logo-512.png" Link="Assets\freeosd-logo-512.png" />
   </ItemGroup>
 
   <ItemGroup>

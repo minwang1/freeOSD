@@ -1,4 +1,4 @@
-# Monitor Control
+# freeOSD
 
 跨平台显示器控制桌面应用，采用 **C#、.NET 10 和 Avalonia**。根目录是唯一活动项目；旧 `python/` 目录不属于开发或验证范围，用户计划后续删除。迁移计划见 [`plan.md`](plan.md)，UI 规格见 [`UI-DESIGN.md`](UI-DESIGN.md)。
 
@@ -8,7 +8,7 @@
 - UI 使用 TKCode.Arc 0.3.2-preview.2 原生 Avalonia 控件与设计 token；设置页支持中文/英文即时切换、应用版本显示、跟随系统/浅色/深色主题，以及浅蓝、浅绿、浅橘或黑色强调色。语言、主题和强调色保存在用户本地配置中；语言覆盖导航、各功能面板、状态提示、对话框和托盘菜单。强调色会应用到控件状态并自动适配深浅背景。按钮、下拉选择、滑块和开关统一 Arc 交互样式。Avalonia FluentTheme 保留给 Windows 托盘右键弹出菜单等原生控件提供默认模板。Arc 仍处于 preview，版本固定以避免浮动升级。
 - Windows DXVA2 DDC/CI 后端初版支持显示器发现、能力读取、常用 VCP 读取与写入。
 - Windows 显示设置页将分辨率与刷新率分开选择和应用；分辨率切换保持当前刷新率，刷新率切换保持当前分辨率，两项均采用 15 秒试用、确认保留或自动恢复。
-- 左侧“色彩管理”面板提供 Windows ICC profile 和 RGB SDR 校准操作。可导入 `.icc`/`.icm` 并关联当前显示器；系统安装 profile 需要管理员权限。RGB 滑块停止调整后会尝试使用临时 Gamma Ramp 预览，不生成文件；点击“应用 RGB 调整”才会弹出可编辑文件名的保存确认，并生成独立 ICC/VCGT profile。临时预览在应用、HDR 开启、切换显示器或退出时尝试恢复原 ramp；具体效果取决于显卡驱动，Windows 可能忽略或重置该 ramp。每通道范围 50–150%，HDR 开启时禁止应用。首次应用保存原始 profile，失败自动回滚，支持手动恢复。RGB 可见变化已在一台 Windows 显示器上由用户确认；其他显示器和 HDR 尚未验证。ICC 列表旁可删除单个未激活的 Monitor Control RGB profile，活动项和备份中的原始 profile 受保护。只读摘要会校验 ICC 文件头和标签边界，并显示 VCGT/MS00/MHC2 结构信息。面板还报告 Windows VCGT/MHC2 能力、系统校准加载器状态和 HDR 状态。仓库提供[导入流程样例](docs/test-profile/test-srgb.icm)，它不含校准曲线，只用于检查导入、关联和恢复流程。
+- 左侧“色彩管理”面板提供 Windows ICC profile 和 RGB SDR 校准操作。可导入 `.icc`/`.icm` 并关联当前显示器；系统安装 profile 需要管理员权限。RGB 滑块停止调整后会尝试使用临时 Gamma Ramp 预览，不生成文件；点击“应用 RGB 调整”才会弹出可编辑文件名的保存确认，并生成独立 ICC/VCGT profile。临时预览在应用、HDR 开启、切换显示器或退出时尝试恢复原 ramp；具体效果取决于显卡驱动，Windows 可能忽略或重置该 ramp。每通道范围 50–150%，HDR 开启时禁止应用。首次应用保存原始 profile，失败自动回滚，支持手动恢复。RGB 可见变化已在一台 Windows 显示器上由用户确认；其他显示器和 HDR 尚未验证。ICC 列表旁可删除单个未激活的 freeOSD RGB profile，活动项和备份中的原始 profile 受保护。只读摘要会校验 ICC 文件头和标签边界，并显示 VCGT/MS00/MHC2 结构信息。面板还报告 Windows VCGT/MHC2 能力、系统校准加载器状态和 HDR 状态。仓库提供[导入流程样例](docs/test-profile/test-srgb.icm)，它不含校准曲线，只用于检查导入、关联和恢复流程。
 - 控制面板只显示常用画面与输入源控件；亮度和对比度滑块占满剩余行宽，不重复显示右侧数值；VCP RGB 增益已隐藏，RGB 校准统一放在“色彩管理”面板。
 - 控制能力读取、VCP 写入、写后读回、分辨率/刷新率模式验证、应用及恢复结果会写入本地诊断日志，路径为 `%LOCALAPPDATA%\MonitorControl\Logs\monitor-control.log`；日志按大小轮转，不包含原始显示器能力转储。DDC/CI 读回暂时失败时会有限重试；仍无法确认的值会标记为未知。
 - Linux DDC/CI 后端尚未实现。Linux 上的 UI 会显示当前平台后端尚不可用。
