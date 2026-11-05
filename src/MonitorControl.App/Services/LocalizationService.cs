@@ -180,12 +180,11 @@ public sealed class LocalizationService : INotifyPropertyChanged
 
 public sealed class LocExtension(string source) : MarkupExtension
 {
-    public override object ProvideValue(System.IServiceProvider serviceProvider) => new Binding(nameof(LocalizationService.Language))
-    {
-        Source = LocalizationService.Instance,
-        Mode = BindingMode.OneWay,
-        Converter = new LocalizedStringConverter(source)
-    };
+    public override object ProvideValue(System.IServiceProvider serviceProvider) => CompiledBinding.Create(
+        static (LocalizationService localizationService) => localizationService.Language,
+        LocalizationService.Instance,
+        new LocalizedStringConverter(source),
+        BindingMode.OneWay);
 }
 
 internal sealed class LocalizedStringConverter(string source) : IValueConverter
