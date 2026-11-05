@@ -666,6 +666,7 @@ public sealed partial class ControlViewModel : ObservableObject
         MonitorCapabilities capabilities;
         var continuous = new List<VcpControlViewModel>();
         var discrete = new List<VcpControlViewModel>();
+        var capabilityListEmpty = false;
         try
         {
             capabilities = await _backend.GetCapabilitiesAsync(monitor.Id);
@@ -674,7 +675,9 @@ public sealed partial class ControlViewModel : ObservableObject
                 .Where(feature => feature.Discovery == VcpCapabilityDiscovery.Advertised)
                 .GroupBy(feature => feature.Code)
                 .ToDictionary(group => group.Key, group => group.First());
-            DiagnosticLog.Write("INFO", "control.capabilities.loaded", $"featureCount={features.Count} continuousCandidates={ContinuousCodes.Length} discreteCandidates={DiscreteCodes.Length}");
+            capabilityListEmpty = features.Count == 0;
+            DiagnosticLog.Write(features.Count == 0 ? "WARN" : "INFO", "control.capabilities.loaded",
+                $"monitor={monitor.Id.Value}; rawFeatureCount={capabilities.VcpFeatures.Count}; acceptedFeatureCount={features.Count}; rawResponsePresent={!string.IsNullOrWhiteSpace(capabilities.RawCapabilities)}; continuousCandidates={ContinuousCodes.Length}; discreteCandidates={DiscreteCodes.Length}");
 
             foreach (var code in ContinuousCodes)
             {
@@ -731,6 +734,14 @@ public sealed partial class ControlViewModel : ObservableObject
 
         if (loadVersion != Volatile.Read(ref _loadVersion) || SelectedMonitor?.Id != monitor.Id)
         {
+            return;
+        }
+
+        if (capabilityListEmpty && ContinuousControls.Any(control => control.MonitorId == monitor.Id))
+        {
+            DiagnosticLog.Write("WARN", "control.capabilities.empty_preserved",
+                $"monitor={monitor.Id.Value}; preservedContinuousControls={ContinuousControls.Count}; preservedDiscreteControls={DiscreteControls.Count}");
+            StatusText = $"{monitor.Name} 本次未返回 DDC/CI 能力列表，保留上次读取的数据。请稍后重新扫描。";
             return;
         }
 

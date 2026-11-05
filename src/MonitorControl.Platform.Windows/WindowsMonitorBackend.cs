@@ -207,15 +207,46 @@ public sealed class WindowsMonitorBackend : IMonitorBackend
 
     private static string ReadCapabilities(IntPtr handle)
     {
-        if (!Native.GetCapabilitiesStringLength(handle, out var length) || length == 0 || length > 65536) return string.Empty;
-        var buffer = new StringBuilder((int)length + 1);
-        return Native.CapabilitiesRequestAndCapabilitiesReply(handle, buffer, length) ? buffer.ToString() : string.Empty;
+        const int maxAttempts = 2;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            if (!Native.GetCapabilitiesStringLength(handle, out var length))
+            {
+                var error = Marshal.GetLastPInvokeError();
+                Trace.TraceWarning($"ddcci.capabilities.length.failed attempt={attempt} win32Error={error}");
+            }
+            else if (length == 0 || length > 65536)
+            {
+                Trace.TraceWarning($"ddcci.capabilities.length.invalid attempt={attempt} length={length}");
+            }
+            else
+            {
+                var buffer = new StringBuilder((int)length + 1);
+                if (Native.CapabilitiesRequestAndCapabilitiesReply(handle, buffer, length))
+                {
+                    var response = buffer.ToString();
+                    Trace.TraceInformation($"ddcci.capabilities.response.completed attempt={attempt} length={length} responseLength={response.Length} hasVcpSection={Regex.IsMatch(response, @"vcp\s*\(", RegexOptions.IgnoreCase)}");
+                    return response;
+                }
+
+                var error = Marshal.GetLastPInvokeError();
+                Trace.TraceWarning($"ddcci.capabilities.response.failed attempt={attempt} length={length} win32Error={error}");
+            }
+
+            if (attempt < maxAttempts) Thread.Sleep(150);
+        }
+
+        return string.Empty;
     }
 
     private static IReadOnlyList<VcpFeature> ParseCapabilities(string capabilities)
     {
         var start = Regex.Match(capabilities, @"vcp\s*\(", RegexOptions.IgnoreCase);
-        if (!start.Success) return [];
+        if (!start.Success)
+        {
+            Trace.TraceWarning($"ddcci.capabilities.parse.failed reason=vcp-section-not-found responseLength={capabilities.Length}");
+            return [];
+        }
         var open = capabilities.IndexOf('(', start.Index);
         var depth = 1; var end = open + 1;
         for (; end < capabilities.Length && depth > 0; end++)
@@ -223,7 +254,11 @@ public sealed class WindowsMonitorBackend : IMonitorBackend
             if (capabilities[end] == '(') depth++;
             else if (capabilities[end] == ')') depth--;
         }
-        if (depth != 0) return [];
+        if (depth != 0)
+        {
+            Trace.TraceWarning("ddcci.capabilities.parse.failed reason=unbalanced-vcp-section");
+            return [];
+        }
         var body = capabilities[(open + 1)..(end - 1)];
         var features = new List<VcpFeature>();
         var pos = 0;
@@ -248,6 +283,7 @@ public sealed class WindowsMonitorBackend : IMonitorBackend
             features.Add(new VcpFeature(code, FeatureNames.GetValueOrDefault(code), values.Count == 0 ? VcpFeatureKind.Continuous : VcpFeatureKind.NonContinuous,
                 EnumeratedValues: values.Count == 0 ? null : values, Discovery: VcpCapabilityDiscovery.Advertised, Availability: CapabilityAvailability.Unknown));
         }
+        Trace.TraceInformation($"ddcci.capabilities.parse.completed featureCount={features.Count}");
         return features;
     }
 
